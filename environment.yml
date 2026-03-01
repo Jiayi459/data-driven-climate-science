@@ -1,0 +1,19 @@
+name: climate-sci
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - matplotlib
+  - xarray
+  - netCDF4
+  - cartopy
+  - scikit-learn
+  - jupyter
+  - jupyterlab
+  - ipykernel
+  - pip
+  - pip:
+    - notebook

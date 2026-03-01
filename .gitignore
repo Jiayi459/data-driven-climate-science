@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Conda / virtual envs
+.env
+.venv
+env/
+venv/
+
+# Data files (large datasets — track with Git LFS if needed)
+data/raw/
+*.nc
+*.h5
+*.hdf5
+*.grib
+*.grb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Results / outputs (optional — remove lines below to track results)
+results/*.png
+results/*.pdf
