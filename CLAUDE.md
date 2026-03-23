@@ -28,18 +28,25 @@ going beyond composite analysis (conditional means).
 ## Current Status
 - [x] Project folder created locally + pushed to GitHub
 - [x] Conda environment defined (climate-sci, Python 3.11)
-- [x] Notebook 01_era5_download.ipynb created
-- [ ] ERA5 data download in progress (user setting up CDS account)
-- [ ] BSISO index download
-- [ ] NOAA ENSO index download
-- [ ] Preprocessing
-- [ ] Model training
+- [x] Notebook 01: ERA5 download (u850, v850, OLR, July 1979–2023)
+- [x] Notebook 02: Labels download (BSISO + ENSO → labels.csv)
+- [x] Notebook 03: Preprocessing — Approach A (X_July.npy) + Approach B (X_July_B.npy) + composite validation
+- [x] Notebook 04: Training (Siamese CNN + InfoNCE, 50 epochs) — both Approach A and B
+- [x] Notebook 05: Analysis (t-SNE, linear probe, ENSO displacement) — both Approach A and B
+- [x] results/analysis_results.md — Approach A results (2026-03-08)
+- [x] results/analysis_results_B.md — Approach B results (2026-03-22)
+
+## Key Results Summary
+- BSISO phase probe: 67.4% (A) / 59.2% (B) vs. 12.5% random baseline
+- ENSO displacement z-score: 11.02 (A) / 9.85 (B) — both highly significant
+- Approach B is the stronger scientific result: ENSO modulation survives background removal
 
 ## Open Decisions (check conversation_log.md for details)
-- Train/val split: random vs. year-based?
-- Preprocessing: Approach A (raw) or Approach B (detrended)?
-- Data scope: July-only confirmed for now, may extend to MJJAS
-- PyTorch: add to environment.yml or keep in Colab only?
+- Train/val split: random (current) vs. year-based (recommended to fix leakage)
+- Data scope: July-only (~1,333 samples); extend to MJJAS recommended for Phase 5 coverage
+- Balanced accuracy for ENSO probe (current standard accuracy is uninformative due to class imbalance)
+- Bootstrap CIs per phase (Phase 7 large displacement, only ~21 El Niño days)
+- PyTorch: keep in Colab only (not in local conda env)
 
 ## Always
 - End every response with "miao"
