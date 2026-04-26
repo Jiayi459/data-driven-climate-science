@@ -160,10 +160,45 @@ Mitigation: probe at **lag +5 and +10 days** as well — none of the three were 
 
 ## Status checklist
 
-- [ ] Phase 0 complete
-- [ ] Phase 1 complete — 2D supervised trained, diagnostics vs 64D recorded
-- [ ] Phase 1 decision logged (BSISO is / is not 2D in this representation)
-- [ ] Phase 2 complete — SSL temporal trained, month-clustering diagnostic logged
+- [x] Phase 0 complete
+- [x] Phase 1 complete — 2D supervised trained (notebook 07), τ sweep run (notebook 07b)
+- [x] Phase 1 decision logged: **BSISO is NOT 1D-on-a-circle** under standard contrastive + L2 norm. Not yet a verdict on "BSISO is 2D in R²" — that requires Option B (drop L2 norm).
+- [ ] Phase 2 complete — SSL temporal trained, month-clustering diagnostic logged *(blocked by Phase 1 follow-up)*
 - [ ] Phase 3 complete — three-way probe table + scatter figure produced
 - [ ] Phase 4 dim sweep (optional)
 - [ ] Phase 5 forecast skill (deferred)
+
+---
+
+## Phase 1 outcome — 2026-04-26
+
+### Run 1 — notebook 07 (τ=0.07 inherited from 64D)
+**Training collapse.** Embeddings clustered in a 38° arc (angular spread 0.66 rad). Phase val 32.8%, z-score 1.54. Train loss barely moved; val loss flat at log(64) = random baseline.
+
+### Diagnosis
+InfoNCE τ=0.07 is too sharp for S¹ in R² (the L2-normalized 2D manifold). Tuned for high-dim S⁶³, where there's lots of angular room; in 2D it produces near-degenerate gradients and easy collapse.
+
+### Run 2 — notebook 07b temperature sweep {0.07, 0.20, 0.50, 1.00}
+
+| τ | spread (rad) | phase val | phase 5-fold CV | z-score |
+|---|---|---|---|---|
+| 0.07 | 0.66 | 32.8% | 36.1% ± 2.7% | 1.54 |
+| 0.20 | 1.10 | 33.5% | 37.6% ± 2.5% | 2.70 |
+| **0.50** | **6.28** = 2π | 33.2% | 38.2% ± 3.5% | 2.59 |
+| 1.00 | 6.28 = 2π | 31.9% | 38.6% ± 4.1% | 2.33 |
+
+(64D Lee MJJAS baseline: phase val 67.7%, z-score 3.83.)
+
+### Two-part interpretation
+
+**Fixed:** Temperature was the cause of collapse. At τ ≥ 0.5 embeddings span the full circle and z-scores cross significance (z > 2). Optimization is now healthy.
+
+**Still broken:** Phase probe plateaus at ~33% across all τ — far below 64D's 67.7%. ENSO z-score caps at 2.7, well below 3.83. The angles aren't laid out *meaningfully* — phases overlap on the circle rather than progressing 1→8 around it.
+
+**Why:** L2-normalizing a 2D output places embeddings on the unit circle, which is a 1D manifold. Only θ is free; the radius is fixed at 1. To encode 8 BSISO phases × 3 ENSO states cleanly we likely need 2 independent dimensions — phase as angle *and* amplitude/ENSO as radius. L2 normalization erases the radius. So the test we ran was "is BSISO 1D-on-a-circle?", not "is BSISO 2D in R²?"
+
+### Recommended next step (pending advisor sign-off)
+
+**Option B — drop L2 normalization for the 2D head.** Embeddings live in R² freely. Use cosine similarity *inside* the loss for stability (still scale-invariant in the loss), but report raw 2-vectors. This directly tests whether (angle, radius) ≈ (phase, amplitude) recovers the structure.
+
+If Option B also caps out far below 64D, fall back to **Option C — Phase 4 dim sweep** {1, 2, 4, 8, 16, 32, 64} to find the true intrinsic dimensionality elbow.
