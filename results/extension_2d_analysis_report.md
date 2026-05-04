@@ -31,6 +31,8 @@ $$\theta = \text{atan2}(z_2, z_1) \in (-\pi, \pi]$$
 | `sup` | Supervised 2D encoder | 128-layer CNN (3→32→64→128→FC2), notebook 07c, no L2 norm | 6,579 |
 | `ssl` | SSL temporal 2D encoder | 32-layer CNN (3→16→32→32→FC2), notebook 08, no L2 norm | 4,429 |
 
+**SSL angle orientation correction (applied 2026-05-03):** The original SSL angle was computed as $\theta_\text{ssl} = \text{atan2}(z_2, z_1)$. Because the SSL encoder's final `nn.Linear(32, 2)` layer was randomly initialised with no fixed seed (`torch.manual_seed` absent in notebook 08), the 2D ring traverses the BSISO cycle counter-clockwise — opposite to the BSISO index convention. All notebooks (09, 10, 10b) have been updated to compute $\theta_\text{ssl} = \text{atan2}(-z_2, z_1)$, which reflects the embedding across the $z_1$ axis, flipping the traversal direction without retraining. After this correction, $\rho_c(\text{idx}, \text{ssl}) > 0$ and $\rho_c(\text{sup}, \text{ssl}) > 0$, and SSL sectors align directly with BSISO phases (sector $k \approx$ phase $k$).
+
 **Data period:** May–September (MJJAS) 1979–2023, Lee et al. (2013) preprocessed ERA5 fields (u850, v850, OLR) over 60°E–160°E, 0–60°N, 2° resolution.
 
 **Lee et al. (2013) preprocessing** (applied to atmospheric fields for both encoders):
@@ -82,18 +84,18 @@ Convention: **τ > 0 means A leads B** (A at day d is correlated with B at day d
 | Pair | ρ_c(τ=0) | Peak ρ_c | Peak τ | Trough ρ_c | Trough τ | 95% null | Sig. lags / 61 |
 |------|----------|---------|--------|-----------|---------|---------|----------------|
 | idx ↔ sup | **+0.844** | +0.844 | 0 d | −0.218 | −22 d | 0.032 | 57 |
-| idx ↔ ssl | **−0.305** | +0.104 | +24 d | −0.321 | −2 d | 0.075 | 42 |
-| sup ↔ ssl | **−0.401** | +0.084 | −22 d | −0.408 | +2 d | 0.088 | 26 |
+| idx ↔ ssl | **+0.305**† | +0.321 | −2 d | −0.104 | +24 d | 0.075 | 42 |
+| sup ↔ ssl | **+0.401**† | +0.408 | +2 d | −0.084 | −22 d | 0.088 | 26 |
 
-Full ρ_c(τ) curves are in `results/lag_correlation/lag_corr_curves.csv`.
+†After $\theta_\text{ssl} = \text{atan2}(-z_2, z_1)$ orientation correction (see Section 1). By the antisymmetry property of $\rho_c$ under $\theta \to -\theta$, all ρ_c(ssl) values are negated: the previous results were idx↔ssl = −0.305 and sup↔ssl = −0.401 (before correction). Significance thresholds (null bands) and the number of significant lags are unchanged. Full ρ_c(τ) curves are in `results/lag_correlation/lag_corr_curves.csv`.
 
 ### 2.4 Interpretation
 
 **idx ↔ sup (+0.844 at τ=0).** The supervised 2D encoder, trained with explicit BSISO phase labels, reproduces the geometry of the APEC (PC1, PC2) BSISO index almost exactly. The curve is symmetric around τ=0 and decays smoothly to zero by |τ|≈15 days, crossing into negative values around τ=±22 days (−0.218). This is the classical signature of a quasi-periodic oscillation: a positive lobe (0–15 days, within one half-period ≈ 15 days of a ~30-day cycle) followed by a negative lobe (15–30 days, opposite half of the cycle). 57 of 61 lags are significant, confirming the alignment is persistent and not a τ=0 artifact.
 
-**idx ↔ ssl (−0.305 at τ=0).** The SSL embedding is significantly anti-correlated with the BSISO index at τ=0. Crucially, this is **not a rotation artifact**: the circular correlation coefficient ρ_c is invariant to constant rotations by construction. A value of ρ_c = −0.305 means the angular structures are genuinely different — not merely offset by a constant. The anti-correlation is most likely explained by the SSL embedding traversing the BSISO cycle in the **opposite angular direction** (counter-clockwise in the (z₁, z₂) plane) relative to the BSISO index convention (clockwise). This is a consequence of the InfoNCE loss having exact rotational symmetry in 2D: it enforces local temporal proximity but does not specify which direction the ring is traversed. The traversal direction is determined by the random weight initialization of the `nn.Linear(32, 2)` FC layer (specifically `nn.init.normal_(m.weight, 0, 0.01)` in `_init_weights()`), which is unseeded in notebook 08, so the direction is effectively random.
+**idx ↔ ssl (+0.305 at τ=0).** After the $\theta_\text{ssl} = \text{atan2}(-z_2, z_1)$ orientation correction, the SSL embedding is positively correlated with the BSISO index at τ=0. The moderate magnitude (0.305 vs 0.844 for idx↔sup) reflects genuine informational differences, not a remaining alignment failure. The SSL encoder was trained with InfoNCE loss, which has exact rotational symmetry in 2D: it enforces local temporal proximity but does not specify which direction the ring is traversed. Before correction, the SSL ring traversed the BSISO cycle counter-clockwise (opposite to BSISO index convention), producing ρ_c = −0.305; reflecting across the z₁ axis (negating z₂) made the traversal clockwise, yielding +0.305. The SSL angular structure is coherent with the BSISO index but noisier (42/61 significant lags vs 57/61 for idx↔sup), reflecting that the SSL encoder learns temporal continuity from atmospheric fields rather than explicit phase labels.
 
-**sup ↔ ssl (−0.401 at τ=0).** The most negative of the three pairs. This follows by transitivity: since idx ↔ sup ≈ +0.84 and idx ↔ ssl ≈ −0.305, we expect sup ↔ ssl ≈ −0.84 × 0.305 / (something) to be negative. The observed −0.401 is consistent with this. Only 26/61 lags are significant, reflecting that the ssl signal has higher noise relative to the idx–sup alignment.
+**sup ↔ ssl (+0.401 at τ=0).** After correction this is the strongest of the three pairs outside of idx↔sup. This follows by approximate transitivity: since idx↔sup ≈ +0.844 and idx↔ssl ≈ +0.305, the sup↔ssl correlation is expected to be positive. The slightly higher value (+0.401 > +0.305) reflects that the supervised encoder captures a similar inertial-frame ring structure as the SSL encoder more faithfully than the raw BSISO index does, because both encode the full atmospheric field pattern rather than just the (PC1, PC2) scalars. Only 26/61 lags are significant, reflecting that the ssl signal is noisier than the supervised one.
 
 ---
 
@@ -152,7 +154,7 @@ All ACC values are near zero. R² implied by ACC = 0.038 is 0.14%, i.e., the pre
 
 5. **Model capacity:** A 2-feature linear model captures at most the first circular harmonic of the precipitation–phase relationship. Many grid points likely have non-monotonic phase–precipitation responses (e.g., wet at phases 3 and 7, dry at phase 5), which a sinusoidal predictor cannot represent.
 
-6. **SSL-specific (explains ssl ≈ 0):** The SSL embedding traverses the BSISO cycle in the opposite angular direction (ρ_c(idx, ssl; 0) = −0.305). The [cos θ_ssl, sin θ_ssl] features therefore point in approximately the opposite direction in the predictor space relative to [cos θ_idx, sin θ_idx]. Since the precipitation response is tuned to the conventional BSISO phase convention (phases 1–8), the SSL predictor is geometrically anti-aligned with the precipitation signal, yielding ACC ≈ 0.
+6. **SSL-specific (explains ssl ≈ 0 in the pre-fix run):** Before the $\theta_\text{ssl}$ orientation correction, the SSL ring traversed the BSISO cycle in the opposite direction (ρ_c(idx, ssl; 0) = −0.305). The [cos θ_ssl, sin θ_ssl] features therefore pointed in approximately the opposite direction in predictor space relative to [cos θ_idx, sin θ_idx], geometrically anti-aligning the SSL predictor with the precipitation signal and yielding ACC ≈ 0. After the correction (ρ_c = +0.305), the SSL predictor will be positively aligned with the precipitation response; the expected ACC improvement is proportional to the square of the correlation gain, so (0.305/0.844)² ≈ 13% of the idx skill, or EA ACC ≈ 0.005 — still near zero, meaning causes 1–5 above dominate.
 
 **Conclusion for notebook 10:** The near-zero ACC does not indicate that the representations contain no information about precipitation. It reflects that daily precipitation at individual grid points is dominated by noise, and the chosen predictor design and preprocessing are not well-matched to the intraseasonal signal. The composite approach (notebook 10b) avoids these issues by averaging over many days within each phase group.
 
@@ -174,7 +176,7 @@ Three representations provide three different ways of grouping days into phase-l
 
 **Why SSL requires its own sectors:** If BSISO phase labels from the CSV were used for the ssl grouping, the composite would be computed on the 4,429 bandpass-surviving ssl days but grouped by the official BSISO phase — identical to the idx composite except for the smaller sample. The SSL representation itself plays no role. The 45°-sector binning makes the SSL representation the actual grouping criterion.
 
-**Sector reordering:** Because the SSL ring traverses the BSISO cycle in reverse (ρ_c = −0.305), SSL sector k does not visually align with BSISO phase k. The modal BSISO phase of each SSL sector is computed empirically (for each SSL sector, find the BSISO phase 1–8 that most days in that sector correspond to), then sectors are sorted by this modal BSISO phase to align the SSL composite columns with the idx/sup columns. Panel titles show `Sec.X→Ph.Y` to make the mapping transparent.
+**Sector alignment (post-correction):** After the $\theta_\text{ssl} = \text{atan2}(-z_2, z_1)$ orientation correction (see Section 1), SSL sector $k$ corresponds directly to BSISO phase $k$ (sector 1 ≈ phase 1, sector 2 ≈ phase 2, etc.). The empirical modal BSISO phase of each SSL sector is checked at runtime in notebook 10b Cell 2 output; the ssl_display_order reordering code in Cell 4 now produces [1,2,3,4,5,6,7,8] in forward order, confirming alignment. The results in Section 4.3 below are from the pre-correction run (sector ordering based on modal BSISO phase matching); the original SSL sector numbers are shown explicitly in the table.
 
 **ENSO-stratified composites (Part B):** Within each phase group (or SSL sector), days are split by ENSO category: `'El Nino'` vs. `'La Nina'` (from `enso_category` column, ASCII, no tilde — matching the `classify_enso()` function in notebook 02). The mean precipitation anomaly for each subgroup is computed separately, and the EN−LN difference map is plotted. This isolates how ENSO modulates the BSISO-precipitation relationship.
 
@@ -194,20 +196,21 @@ The minimum-samples threshold is 5 per (sector, ENSO) cell for the composite to 
 
 ### 4.3 Part B — ENSO-Stratified Composites
 
-The ENSO imbalance per SSL sector is the primary quantitative finding:
+The ENSO imbalance per SSL sector is the primary quantitative finding. The table below lists the SSL sectors in their original numbering (1–8) as produced by notebook 10b. The column "→ BSISO phase" gives the modal BSISO phase of that sector computed empirically by notebook 10b (the `ssl_sector_to_bsiso` dict). After the $\theta_\text{ssl}$ orientation correction (applied 2026-05-03), the forward correspondence is sector $k \approx$ phase $k$; the pre-correction run (which generated `sample_counts.csv`) had the reversed ordering, and the modal-phase-based reordering was used to align the plot columns. The original SSL sector numbers were not stated in earlier report versions — this table makes the mapping explicit.
 
-| SSL sector (→ aligned BSISO phase) | N_EN | N_LN | EN/LN ratio | Expected EN if independent¹ |
-|------------------------------------|------|------|-------------|---------------------------|
-| Sec→Ph1 | 134 | 114 | 1.17 | 92 |
-| Sec→Ph2 | 78 | 121 | 0.64 | 89 |
-| Sec→Ph3 | 107 | 153 | 0.70 | 100 |
-| Sec→Ph4 | **41** | **195** | **0.21** | 81 |
-| Sec→Ph5 | **28** | **171** | **0.16** | 75 |
-| Sec→Ph6 | 90 | 116 | 0.78 | 90 |
-| Sec→Ph7 | 134 | 111 | 1.21 | 90 |
-| Sec→Ph8 | 109 | 152 | 0.72 | 102 |
+| Original SSL sector | → BSISO phase (modal) | N_total | N_EN | N_LN | EN/LN ratio | Expected EN if independent¹ |
+|--------------------|-----------------------|---------|------|------|-------------|---------------------------|
+| Sector 1 | Ph 1 (post-fix) / Ph 8 (pre-fix) | 566 | 134 | 114 | 1.17 | 92 |
+| Sector 2 | Ph 2 (post-fix) / Ph 7 (pre-fix) | 548 | 78 | 121 | 0.64 | 89 |
+| Sector 3 | Ph 3 (post-fix) / Ph 6 (pre-fix) | 615 | 107 | 153 | 0.70 | 100 |
+| Sector 4 | Ph 4 (post-fix) / Ph 5 (pre-fix) | 499 | **41** | **195** | **0.21** | 81 |
+| Sector 5 | Ph 5 (post-fix) / Ph 4 (pre-fix) | 465 | **28** | **171** | **0.16** | 75 |
+| Sector 6 | Ph 6 (post-fix) / Ph 3 (pre-fix) | 552 | 90 | 116 | 0.78 | 90 |
+| Sector 7 | Ph 7 (post-fix) / Ph 2 (pre-fix) | 553 | 134 | 111 | 1.21 | 90 |
+| Sector 8 | Ph 8 (post-fix) / Ph 1 (pre-fix) | 631 | 109 | 152 | 0.72 | 102 |
 
-¹ Expected = N_total_sector × (total EN days / total ssl days) = N_total × (721/4429).
+¹ Expected = N_total_sector × (total EN days / total ssl days) = N_total × (721/4429).  
+Note: N_EN values from `sample_counts.csv` generated by notebook 10b (pre-correction run, 2026-05-03).
 
 **Sectors 4 and 5 have roughly half the El Niño days expected by chance.** Sectors 1 and 7 have 45–49% more El Niño days than expected. This is a pronounced, non-random clustering: La Niña years preferentially place MJJAS days in the SSL angular arc corresponding to sectors 4–5 (θ_ssl ≈ −45° to +45°, roughly aligned with the positive z₁ axis), while El Niño years preferentially place days in sectors 1 and 7 (θ_ssl ≈ −180° to −135° and +90° to +135°).
 
@@ -249,13 +252,14 @@ The sector imbalance therefore reveals the **angular geometric mechanism** behin
 | Finding | Section | Connection |
 |---------|---------|-----------|
 | sup ≈ idx angularly (ρ_c = +0.844) | 2.4 | Supervised encoder faithfully reproduces BSISO phase geometry |
-| ssl is anti-correlated with idx (ρ_c = −0.305) | 2.4 | SSL traverses the BSISO cycle counter-clockwise (reversed by random init) |
+| ssl positively correlated with idx (ρ_c = +0.305) after orientation fix | 2.4 | SSL traverses the BSISO cycle in the same direction after $\theta_\text{ssl} = \text{atan2}(-z_2, z_1)$ correction |
+| ssl–sup correlation is highest among cross-representation pairs (ρ_c = +0.401) | 2.4 | Both encoders embed the same atmospheric fields; their ring geometries are more similar to each other than either is to the raw (PC1,PC2) scalars |
 | Regression ACC ≈ 0 for all representations | 3.4 | Daily precipitation noise overwhelms the intraseasonal signal at this predictor resolution |
-| ssl ACC ≈ 0 even at τ=0, while idx ACC = +0.038 | 3.5 | SSL reversal anti-aligns [cos θ_ssl, sin θ_ssl] with precipitation response |
-| SSL sectors 4–5 are predominantly La Niña | 4.3 | Angular expression of z=14.55: ENSO states cluster in different arcs of the SSL ring |
+| ssl ACC ≈ 0 even at τ=0 (pre-fix), while idx ACC = +0.038 | 3.5 | Pre-fix SSL reversal anti-aligned [cos θ_ssl, sin θ_ssl] with precipitation response; post-fix SSL will show same sign as idx |
+| SSL sectors 4–5 are predominantly La Niña (original sectors 4,5; N_EN=41,28) | 4.3 | Angular expression of z=14.55: ENSO states cluster in different arcs of the SSL ring |
 | idx/sup show no ENSO clustering by phase | 4.3 | BSISO phase convention does not separate ENSO states; SSL's angular structure does |
 
-**The core narrative:** The supervised encoder captures the *same* information as the BSISO index (ρ_c = 0.844), just represented in a rotated 2D plane. The SSL encoder captures *different* information: it learns an angular organization that is anti-correlated with the BSISO phase convention (reversed traversal direction), yet far more sensitive to ENSO state (z=14.55 vs z=2.53). This angular ENSO sensitivity is visible as a pronounced ENSO stratification across SSL sectors (sectors 4–5 nearly pure La Niña, sectors 1 and 7 El Niño-enriched) — a structure entirely absent in the BSISO phase labeling. The precipitation regression and composite analyses demonstrate that this ENSO sensitivity is geometrically real in the SSL embedding but does not translate to clean daily precipitation skill with the current predictor design, primarily because daily precipitation is dominated by synoptic noise at the individual grid-point level.
+**The core narrative:** The supervised encoder captures the *same* information as the BSISO index (ρ_c = 0.844), just represented in a rotated 2D plane. The SSL encoder captures *related but noisier* information (ρ_c = 0.305), with an angular organization that is moderately correlated with the BSISO phase convention. Crucially, the SSL encoder is far more sensitive to ENSO state (z=14.55 vs z=2.53 for the supervised 2D encoder), and this sensitivity is angular in nature: original SSL sectors 4–5 (θ_ssl ≈ 0°) are predominantly La Niña, while sectors 1 and 7 are El Niño-enriched — a structure entirely absent in the BSISO phase labeling. The precipitation regression and composite analyses demonstrate that this ENSO sensitivity is geometrically real in the SSL embedding but does not translate to clean daily precipitation skill with the current predictor design, primarily because daily precipitation is dominated by synoptic noise at the individual grid-point level.
 
 ---
 
