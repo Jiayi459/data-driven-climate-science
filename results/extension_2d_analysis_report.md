@@ -81,21 +81,32 @@ Convention: **τ > 0 means A leads B** (A at day d is correlated with B at day d
 
 ### 2.3 Results
 
+Results confirmed from notebook 09 run on 2026-05-04 with the $\theta_\text{ssl} = \text{atan2}(-z_2, z_1)$ orientation correction applied. Full curves are in `results/lag_correlation/lag_corr_curves.csv`.
+
 | Pair | ρ_c(τ=0) | Peak ρ_c | Peak τ | Trough ρ_c | Trough τ | 95% null | Sig. lags / 61 |
 |------|----------|---------|--------|-----------|---------|---------|----------------|
 | idx ↔ sup | **+0.844** | +0.844 | 0 d | −0.218 | −22 d | 0.032 | 57 |
-| idx ↔ ssl | **+0.305**† | +0.321 | −2 d | −0.104 | +24 d | 0.075 | 42 |
-| sup ↔ ssl | **+0.401**† | +0.408 | +2 d | −0.084 | −22 d | 0.088 | 26 |
+| idx ↔ ssl | **+0.305** | +0.321 | −2 d | −0.104 | +24 d | 0.075 | 42 |
+| sup ↔ ssl | **+0.401** | +0.408 | +2 d | −0.084 | −22 d | 0.088 | 26 |
 
-†After $\theta_\text{ssl} = \text{atan2}(-z_2, z_1)$ orientation correction (see Section 1). By the antisymmetry property of $\rho_c$ under $\theta \to -\theta$, all ρ_c(ssl) values are negated: the previous results were idx↔ssl = −0.305 and sup↔ssl = −0.401 (before correction). Significance thresholds (null bands) and the number of significant lags are unchanged. Full ρ_c(τ) curves are in `results/lag_correlation/lag_corr_curves.csv`.
+The peak-to-τ=0 differences for the ssl pairs are negligible: idx↔ssl peak vs τ=0 difference = +0.016 (exactly at the sampling-noise floor of $1/\sqrt{4429} \approx 0.015$); sup↔ssl peak vs τ=0 difference = +0.007 (well within noise). Both pairs should be treated as **peaking at τ ≈ 0**, i.e., the representations are approximately synchronous.
 
 ### 2.4 Interpretation
 
-**idx ↔ sup (+0.844 at τ=0).** The supervised 2D encoder, trained with explicit BSISO phase labels, reproduces the geometry of the APEC (PC1, PC2) BSISO index almost exactly. The curve is symmetric around τ=0 and decays smoothly to zero by |τ|≈15 days, crossing into negative values around τ=±22 days (−0.218). This is the classical signature of a quasi-periodic oscillation: a positive lobe (0–15 days, within one half-period ≈ 15 days of a ~30-day cycle) followed by a negative lobe (15–30 days, opposite half of the cycle). 57 of 61 lags are significant, confirming the alignment is persistent and not a τ=0 artifact.
+**idx ↔ sup (+0.844 at τ=0).** The supervised 2D encoder, trained with explicit BSISO phase labels, reproduces the geometry of the APEC (PC1, PC2) BSISO index almost exactly. The curve is symmetric around τ=0, decaying smoothly to zero by |τ|≈15 days and crossing into negative values around τ=±22 days (trough −0.218). This is the classical signature of a quasi-periodic oscillation: a positive lobe (|τ| ≤ 15 days, within one half-period of a ~30-day cycle) followed by a weak negative lobe (half-period phase opposition). 57 of 61 lags are significant.
 
-**idx ↔ ssl (+0.305 at τ=0).** After the $\theta_\text{ssl} = \text{atan2}(-z_2, z_1)$ orientation correction, the SSL embedding is positively correlated with the BSISO index at τ=0. The moderate magnitude (0.305 vs 0.844 for idx↔sup) reflects genuine informational differences, not a remaining alignment failure. The SSL encoder was trained with InfoNCE loss, which has exact rotational symmetry in 2D: it enforces local temporal proximity but does not specify which direction the ring is traversed. Before correction, the SSL ring traversed the BSISO cycle counter-clockwise (opposite to BSISO index convention), producing ρ_c = −0.305; reflecting across the z₁ axis (negating z₂) made the traversal clockwise, yielding +0.305. The SSL angular structure is coherent with the BSISO index but noisier (42/61 significant lags vs 57/61 for idx↔sup), reflecting that the SSL encoder learns temporal continuity from atmospheric fields rather than explicit phase labels.
+**idx ↔ ssl (+0.305 at τ=0).** The SSL embedding is positively and significantly correlated with the BSISO index across all near-zero lags. The technical peak is at τ=−2 (+0.321), but the difference from τ=0 (+0.305) is 0.016, which is exactly the sampling noise level ($1/\sqrt{N_\text{pairs}} \approx 0.015$) — this 2-day offset should not be interpreted as a genuine physical lag. The curve shape mirrors the quasi-periodic structure of the idx↔sup curve: the positive lobe spans roughly τ ∈ [−15, +17] (width ~32 days, consistent with a BSISO half-period of ~30–45 days), after which ρ_c crosses zero and reaches a weak trough of −0.104 at τ=+24 (roughly the half-period of the oscillation, implying an effective period of ~40 days in SSL space). 42 of 61 lags are significant.
 
-**sup ↔ ssl (+0.401 at τ=0).** After correction this is the strongest of the three pairs outside of idx↔sup. This follows by approximate transitivity: since idx↔sup ≈ +0.844 and idx↔ssl ≈ +0.305, the sup↔ssl correlation is expected to be positive. The slightly higher value (+0.401 > +0.305) reflects that the supervised encoder captures a similar inertial-frame ring structure as the SSL encoder more faithfully than the raw BSISO index does, because both encode the full atmospheric field pattern rather than just the (PC1, PC2) scalars. Only 26/61 lags are significant, reflecting that the ssl signal is noisier than the supervised one.
+The magnitude difference (0.305 vs 0.844) is expected and reflects three factors:
+1. **Different training objectives**: idx is a direct BSISO measurement; SSL was trained on temporal proximity, not phase labels. The SSL encoder learns intraseasonal continuity from atmospheric fields, not BSISO geometry directly.
+2. **ENSO information in SSL**: the SSL ring carries strong ENSO information (z=14.55); the angular component attributable to ENSO is orthogonal to the BSISO phase cycle and contributes to angular variance that is uncorrelated with θ_idx, suppressing ρ_c.
+3. **Fewer samples**: ssl uses 4,429 bandpass-filtered days vs 6,579 for idx/sup; the smaller dataset slightly inflates noise.
+
+Despite the lower magnitude, ρ_c = +0.305 is highly significant (42/61 lags exceed the 95% null band of 0.075), confirming the SSL representation genuinely captures the angular BSISO cycle.
+
+**sup ↔ ssl (+0.401 at τ=0).** The strongest of the three pairs involving ssl. The technical peak is at τ=+2 (+0.408), but the difference from τ=0 is only 0.007 (well within noise); the two pairs (idx↔ssl peak at τ=−2, sup↔ssl peak at τ=+2) point in opposite directions, which is self-contradictory if interpreted as real lags — confirming both are noise artifacts and the true peak is at τ=0. The positive lobe spans τ ∈ [−15, +18] (~33 days), with a weak trough at τ=−22 (−0.084). Only 26/61 lags are significant, reflecting noisier alignment than the idx↔sup pair.
+
+The fact that ρ_c(sup, ssl; 0) = +0.401 > ρ_c(idx, ssl; 0) = +0.305 is physically meaningful: both the supervised encoder and the SSL encoder process the same ERA5 atmospheric fields (u850, v850, OLR). Their 2D embeddings therefore share the spatial structure of the intraseasonal variability even though they were trained with different objectives. The raw BSISO index, by contrast, uses only the (PC1, PC2) scalar projections — it discards all spatial structure and is therefore geometrically less similar to the SSL embedding than the field-based supervised encoder is.
 
 ---
 
