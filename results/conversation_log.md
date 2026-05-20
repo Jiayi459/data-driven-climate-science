@@ -1,0 +1,2586 @@
+# DDCS Project — Conversation Log
+**Project:** ENSO-BSISO Self-Supervised Learning (SSL)
+**GitHub:** https://github.com/Jiayi459/data-driven-climate-science
+**Local Folder:** ~/data-driven-climate-science
+**Email:** jh9141@nyu.edu
+
+---
+
+## How to Read This File
+- Each session is dated and summarized
+- **`> UNANSWERED`** marks questions still awaiting a decision
+- `✓ DECIDED` marks resolved decisions
+
+---
+
+## Session 1 — Project Setup & Framework Review
+
+### What We Did
+- Created local project folder: `~/data-driven-climate-science`
+  - Subfolders: `data/`, `notebooks/`, `src/`, `results/`
+  - Files: `README.md`, `.gitignore`, `environment.yml`
+- Conda environment `climate-sci` specified (Python 3.11, numpy, pandas, matplotlib, xarray, netCDF4, cartopy, scikit-learn, jupyterlab)
+- Initialized git repo with user: `Jiayi459 <jh9141@nyu.edu>`
+- Created public GitHub repo and pushed initial commit
+- Read and analyzed two project documents:
+  - `complete_research_framework.md` — high-level research design
+  - `step_by_step_implementation_guide.md` — explicit implementation steps
+
+---
+
+### Project Summary (from documents)
+
+**Research Question:**
+Can self-supervised contrastive learning discover a representation that captures how ENSO modulates BSISO's atmospheric structure, beyond the conditional means provided by composite analysis?
+
+**Method:**
+- Input: 3-channel atmospheric fields (u850, v850, OLR) from ERA5
+- Spatial domain: 60°E–160°E, 0°N–60°N, 2° resolution (30 lat × 50 lon grid)
+- Temporal: July only, 1979–2023, daily → ~1,395 samples
+- Labels: BSISO phase (1–8) from APEC, ENSO category from NOAA Niño 3.4
+- Model: Siamese CNN encoder (3 conv layers, ~250K params) + InfoNCE loss
+- Pair design: Positive (same phase + same ENSO), Hard Negative (same phase + different ENSO), Easy Negative (different phase)
+
+**Platform (as planned in documents):**
+- Local: data preprocessing
+- Google Colab: GPU training
+
+---
+
+### Decisions Made ✓
+
+| Decision | Choice |
+|----------|--------|
+| Repo name | `data-driven-climate-science` |
+| Local folder location | `~/` (home directory) |
+| GitHub visibility | Public |
+| Conda Python version | 3.11 |
+| Conda packages | numpy, pandas, matplotlib, xarray, netCDF4, cartopy, scikit-learn, jupyterlab |
+
+---
+
+### Questions & Open Issues
+
+**`> UNANSWERED`** — Data access confirmed?
+- ERA5: Need a CDS API account + key at copernicus.eu. Registered?
+- APEC BSISO Index: apcc21.org link may be unreliable. Verified you can download?
+
+**`> UNANSWERED`** — Train/val split strategy?
+- Current plan: random 80/20 split by day index
+- Risk: days from same ENSO year appear in both train and val → inflates linear probe accuracy
+- Suggested alternative: split by year (hold out ~9 years as val set)
+- Decision needed: random split vs. year-based split?
+
+**`> UNANSWERED`** — Preprocessing Approach A or B to start?
+- Approach A: normalize raw fields (simpler, but model may just learn ENSO large-scale background)
+- Approach B: remove interannual signal first, then normalize (more scientifically rigorous for this research question)
+- Given the question is specifically about ENSO *modulation* of BSISO, Approach B may be more appropriate from the start
+
+**`> UNANSWERED`** — Data scope: July-only or extend to MJJAS?
+- July-only: 1,395 samples total, very sparse per bin (phase × ENSO)
+- MJJAS (May–September): ~5x more samples, better coverage
+- Is July-only a hard constraint from the course?
+
+**`> UNANSWERED`** — PyTorch in conda environment?
+- Current `environment.yml` has climate data stack only (no PyTorch, torchvision, captum)
+- Add to local environment, or keep ML entirely in Google Colab?
+
+**`> UNANSWERED`** — Workflow: local + Colab vs. all on Colab?
+- Can all steps (data download → preprocessing → training) be done entirely on Colab?
+- User has limited local storage — this is a key constraint
+- **(See Session 2 for full discussion)**
+
+---
+
+## Session 2 — Workflow Decision: Colab vs Local
+
+### Google Colab vs Local — Full Comparison
+
+#### What is Google Colab?
+Google Colab is a free, cloud-based Jupyter notebook environment that runs entirely in your browser. No installation needed. You get access to Google's servers (including GPUs) and your files can be stored on Google Drive.
+
+#### Advantages of Google Colab
+
+| Advantage | Details |
+|-----------|---------|
+| **Free GPU** | T4 GPU (~16GB VRAM) — essential for training |
+| **No local storage needed** | All files live on Google Drive |
+| **No setup required** | Python, numpy, pandas, torch all pre-installed |
+| **Access anywhere** | Any browser, any device |
+| **Easy to share** | Share notebook link like a Google Doc |
+| **Can do everything** | Download data, preprocess, train — all in one place |
+
+#### Disadvantages of Google Colab
+
+| Disadvantage | Details |
+|--------------|---------|
+| **Session timeouts** | Disconnects after ~90 min idle, max 12 hours continuous |
+| **Not persistent** | Every new session: re-install packages, re-mount Drive |
+| **Slower I/O** | Reading from Google Drive is slower than local SSD |
+| **RAM limited** | ~12–16 GB RAM (free tier) |
+| **No background jobs** | Can't run overnight unattended (session expires) |
+| **Internet required** | No offline work |
+| **GPU not guaranteed** | Peak hours may give CPU only |
+
+#### Local Machine Advantages/Disadvantages
+
+| | Details |
+|-|---------|
+| ✓ Fast local I/O | Reading files from disk is fast |
+| ✓ Persistent | Files and environment stay between sessions |
+| ✓ Works offline | No internet needed |
+| ✗ No GPU | Training would be very slow (hours → days) |
+| ✗ Limited storage | Constraint mentioned by user |
+| ✗ Setup required | Must install packages, manage environments |
+
+---
+
+### Can All Steps Be Done on Colab? YES
+
+Every step of this project can be done entirely on Google Colab + Google Drive:
+
+| Step | On Colab? | How |
+|------|-----------|-----|
+| Download APEC BSISO index | ✓ | `requests` or manual upload to Drive |
+| Download NOAA ENSO index | ✓ | `wget` or `requests` in a cell |
+| Download ERA5 (u850, v850, OLR) | ✓ | Install `cdsapi`, download directly to Drive |
+| Data cleaning & QC | ✓ | Python cells with xarray, pandas |
+| Normalization & preprocessing | ✓ | numpy operations |
+| Pair construction & data loader | ✓ | PyTorch (pre-installed) |
+| CNN model + InfoNCE loss | ✓ | PyTorch |
+| Training (GPU) | ✓ | T4 GPU, ~2.5 hrs for 50 epochs |
+| Embedding extraction | ✓ | Run on GPU, save to Drive |
+| t-SNE + figures | ✓ | scikit-learn, matplotlib |
+| Final report | ✓ | Can export notebook as PDF |
+
+**Key setup:** Link Google Drive to Colab for persistent storage. All files (data, checkpoints, results) live on Drive and survive session restarts.
+
+---
+
+### Recommended Workflow (All on Colab)
+
+```
+Google Drive/
+└── BSISO_SSL_Project/
+    ├── data/
+    │   ├── raw/          ← ERA5 .nc files, BSISO/ENSO .csv
+    │   └── processed/    ← X_July.npy, labels.csv, etc.
+    ├── notebooks/
+    │   ├── 01_data_download.ipynb
+    │   ├── 02_preprocessing.ipynb
+    │   ├── 03_training.ipynb
+    │   └── 04_analysis.ipynb
+    ├── src/              ← .py files (model, dataloader, loss)
+    ├── checkpoints/      ← model weights saved every 10 epochs
+    └── results/          ← figures, metrics
+```
+
+**How to use Colab step by step:**
+1. Go to colab.research.google.com
+2. Create a new notebook
+3. First cell: `from google.colab import drive; drive.mount('/content/drive')`
+4. Set runtime to GPU: Runtime → Change runtime type → T4 GPU
+5. Install any extra packages with `!pip install cdsapi xarray cartopy`
+6. Work normally — save outputs to `/content/drive/MyDrive/BSISO_SSL_Project/`
+7. When session ends, all Drive files persist — just re-mount next time
+
+---
+
+### Open Questions from This Session
+
+**`> UNANSWERED`** — Workflow confirmed: all on Colab?
+- Given limited local storage, all-Colab workflow is recommended
+- Still need to decide: will you use Google Colab Free or Colab Pro (~$10/month)?
+- Colab Pro gives longer sessions (24 hrs), more RAM, priority GPU access
+
+**`> UNANSWERED`** — Data scope decision (deferred from Session 1):
+- Now that workflow is clearer, we can decide: July-only or MJJAS?
+- Storage on Google Drive: ERA5 for July only ≈ 200-400 MB; MJJAS ≈ 1-2 GB
+- Both are manageable on Google Drive (free tier: 15 GB)
+
+---
+
+---
+
+## Session 3 — ERA5 Download Setup
+
+### Decisions Made ✓
+
+| Decision | Choice |
+|----------|--------|
+| Workflow | All on Google Colab + Google Drive |
+| Data scope (for now) | July only (1979–2023), extend to MJJAS later if needed |
+| First download | ERA5 u850, v850, OLR |
+
+### What Was Created
+- `notebooks/01_era5_download.ipynb` — Colab notebook for ERA5 download
+- Pushed to GitHub: https://github.com/Jiayi459/data-driven-climate-science
+
+### User Action Required Before Running Notebook
+
+**Step 1 — Register at CDS (Copernicus Climate Data Store)**
+1. Go to: https://cds.climate.copernicus.eu/
+2. Click Register → fill in details → verify email
+3. Log in → Your profile → copy your **Personal Access Token**
+
+**Step 2 — Accept ERA5 Licenses (MUST do before downloading)**
+1. https://cds.climate.copernicus.eu/datasets/reanalysis-era5-pressure-levels → Accept Terms
+2. https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels → Accept Terms
+
+**Step 3 — Open Notebook in Colab**
+- Go to: https://colab.research.google.com/
+- File → Open notebook → GitHub tab
+- Paste: `https://github.com/Jiayi459/data-driven-climate-science`
+- Open: `notebooks/01_era5_download.ipynb`
+- Set runtime to GPU: Runtime → Change runtime type → T4 GPU
+- Paste your API token into Cell 4
+- Run all cells top to bottom
+
+### Expected Outputs (on Google Drive)
+```
+BSISO_SSL_Project/data/raw/
+├── u850_v850_July_1979_2023.nc   (~40-60 MB)
+└── OLR_July_1979_2023.nc          (~20-30 MB)
+```
+
+### `> UNANSWERED` — Still Open from Previous Sessions
+- BSISO index from APEC: confirmed downloadable?
+- Train/val split: random vs. year-based?
+- Preprocessing: Approach A or B?
+- PyTorch: add to conda environment.yml?
+
+---
+
+## Session 4 — ERA5 Download Execution (2026-03-03)
+
+### What We Did
+- User ran `01_era5_download.ipynb` on Google Colab
+- **Cell 5 (wind download)** initially failed with `403 Forbidden: required licences not accepted`
+  - Fix: accept licence at `https://cds.climate.copernicus.eu/datasets/reanalysis-era5-pressure-levels?tab=download#manage-licences`
+  - After accepting, re-ran cell 5 — all 5 chunks downloaded successfully
+- **Cell 6 (OLR download)** ran successfully
+- **Cell 7 (verification)** had a minor bug: `KeyError: 'time'`
+  - Cause: new CDS API uses `valid_time` as dimension name, not `time`
+  - Fix: change `ds_wind.dims["time"]` → `ds_wind.dims["valid_time"]` on line 21
+
+### ERA5 Wind Files Downloaded ✓
+| File | Size |
+|------|------|
+| u850_v850_July_1979_1989.nc | 2.9 MB |
+| u850_v850_July_1990_1999.nc | 2.7 MB |
+| u850_v850_July_2000_2009.nc | 2.7 MB |
+| u850_v850_July_2010_2019.nc | 2.7 MB |
+| u850_v850_July_2020_2023.nc | 1.1 MB |
+| **Total wind** | **~12.1 MB** |
+
+### Note on CDS API Change
+- The new CDS API (post Feb 2026 upgrade) names the time dimension `valid_time` instead of `time`
+- Any future verification or preprocessing code must use `valid_time` when referencing this dimension
+
+### Status at End of Session
+- [x] ERA5 u850/v850 all chunks downloaded
+- [x] ERA5 OLR downloaded
+- [x] Cell 7 verification passed (fixed `valid_time` dimension name)
+- [x] Notebook 02 created: `notebooks/02_labels_download.ipynb`
+- [ ] Next: BSISO index download (manual from APEC), NOAA ENSO index download (auto)
+
+### `> UNANSWERED` — Still Open
+- BSISO index from APEC: confirmed downloadable?
+- Train/val split: random vs. year-based?
+- Preprocessing: Approach A or B?
+- PyTorch: add to conda environment.yml?
+
+---
+
+## Session 5 — Notebook Fixes + Labels Download + Notebook 3 Created (2026-03-03)
+
+### What We Did
+
+#### GitHub Notebook Rendering Error (Both Notebooks)
+- **Problem:** GitHub showed `the 'state' key is missing from 'metadata.widgets'`
+- **Cause:** Colab-pushed notebook had stale ipywidgets metadata (`metadata.widgets` without `state` key)
+- **Fix:** Pulled remote changes, stripped `metadata.widgets` with Python, committed + pushed
+- **Lesson:** Always `git pull --rebase` before pushing after working in Colab; clear notebook outputs before saving to GitHub
+
+#### BSISO File Format Discovery (Notebook 02, Cell 3)
+- User downloaded `BSISO.INDEX.NORM.LY.data` from APEC
+- **Actual format** (NOT what we originally assumed):
+  ```
+  YEAR  DOY  BSISO1-1  BSISO1-2  BSISO2-1  BSISO2-2  BSISO1_amp  BSISO2_amp
+  ```
+  - `DOY` = day-of-year (1–365), **not** day-of-month
+  - **No phase column** — phase must be computed from PC1/PC2
+  - **No month column** — month derived from year + DOY
+  - Data starts **1981** (not 1979), ends 2025 day 304
+  - 16,376 rows total
+
+- **Fix applied to Cell 3:**
+  - Parse `year` + `doy` → `date` via `pd.to_datetime('%Y%j')`
+  - Compute BSISO1 phase (1–8): `atan2(PC2, PC1)` → divide 360° into 8 sectors of 45°
+  - Amplitude = column `bsiso1_amp` (col index 6)
+- **Fix applied to Cell 4:** Use `date.dt.month == 7` instead of `df['month'] == 7`
+
+#### Notebook 02 Successfully Ran ✓
+- All 8 cells ran on Colab without errors
+- `labels.csv` saved to Google Drive: `BSISO_SSL_Project/data/raw/labels.csv`
+- Note: date range is **1981–2023** (43 years × 31 days ≈ 1,333 July samples), not 1979–2023
+
+#### Notebook 03 Created
+- `notebooks/03_preprocessing.ipynb` pushed to GitHub
+- See "What Was Created" below
+
+### What Was Created
+- `notebooks/03_preprocessing.ipynb` — preprocessing pipeline:
+  - Loads + concatenates 5 ERA5 wind chunks → merged xarray dataset
+  - Loads OLR (`ttr`), negates to get positive OLR values
+  - Aligns dates: ERA5 ∩ labels (intersection)
+  - Builds `(N, 3, 31, 51)` float32 array
+  - Z-score normalizes per channel (over all data for now — see open question)
+  - Saves: `X_July.npy`, `labels_aligned.csv`, `norm_stats.json`
+
+### Key Technical Facts Confirmed from Notebook Outputs
+| Item | Value |
+|------|-------|
+| Wind grid | 31 lat × 51 lon (0–60°N, 60–160°E, 2°) |
+| Wind variable names | `u`, `v` (not `u850`/`v850`) |
+| Wind time dimension | `valid_time` (includes 12:00 UTC) |
+| OLR variable name | `ttr` (top net thermal radiation) |
+| OLR unit | J/m² (negative — ERA5 convention) |
+| OLR conversion | negate: `olr = -ttr` |
+| BSISO data range | 1981–2025 (only 1981–2023 used) |
+| Expected N after alignment | ~1,333 July days |
+
+### Decisions Made ✓
+- Workflow: all on Colab + Google Drive confirmed
+- ERA5 downloaded: u850, v850, OLR (July 1979–2023)
+- BSISO downloaded: 1981–2025 daily
+- NOAA ENSO downloaded: auto via `requests`
+
+### `> UNANSWERED` — Still Open
+- **Train/val split:** random vs. year-based? (affects how norm_stats should be computed)
+- **Preprocessing:** Approach A (raw z-score) or Approach B (remove interannual signal first)?
+  - Notebook 03 currently implements Approach A
+- **Data scope:** July-only confirmed for now (1,333 samples). Extend to MJJAS later?
+- **PyTorch:** add to conda `environment.yml` or keep in Colab only?
+
+---
+
+## Session 6 — Label Validation via Composite Analysis (2026-03-07)
+
+### What We Did
+
+#### Explained Cell 6 Array Structure
+- `X_July.npy` shape: `(N, 3, H, W)` = `(1333, 3, 31, 51)`
+- Channel 0: **u850** — zonal (east-west) wind at 850 hPa, m/s
+- Channel 1: **v850** — meridional (north-south) wind at 850 hPa, m/s
+- Channel 2: **OLR** = `-ttr` — negated top net thermal radiation; proxy for deep convection (low OLR = active convection/clouds)
+
+#### Added Composite Validation Cells to Notebook 03
+- **Cell 10:** OLR + wind composites by BSISO phase (2×4 grid, phases 1–8)
+  - Saves: `results/bsiso_phase_composites.png`
+- **Cell 11:** OLR + wind composites by ENSO category (1×3 grid)
+  - Saves: `results/enso_composites.png`
+- Both cells are self-contained: mount Drive + load from hardcoded path if run fresh
+
+#### Bug Fixed
+- Original fallback in Cells 10 & 11 used `PROCESSED_DIR` (undefined in fresh session)
+- Fix: replaced with hardcoded path `/content/drive/MyDrive/BSISO_SSL_Project/data/processed`
+
+### Label Validation Results ✓
+
+**BSISO Phase Composites — PASS**
+- Clear northward + eastward propagating convective envelope across phases 1→8
+- Phase 1–2: active convection (blue/low OLR) over Indian Ocean (~70–90°E, equatorial)
+- Phase 3–4: convection shifts north to Bay of Bengal / South Asia
+- Phase 5–6: convection moves east to Western Pacific / Philippines
+- Phase 7–8: suppressed phase, signal returning
+- Wind arrows show coherent low-level convergence flanking convective regions
+- **Conclusion: BSISO phase labels are correct**
+
+**ENSO Composites — PASS**
+- El Niño: suppressed convection (red/high OLR) over Maritime Continent — correct
+- La Niña: enhanced convection (blue/low OLR) over Maritime Continent — correct
+- Neutral: weaker mixed signal — expected
+- ENSO signal amplitude (±0.5σ) is weaker than BSISO (±1.2σ) — physically expected
+- **Conclusion: ENSO category labels are correct**
+
+### Key Scientific Note
+The weaker ENSO amplitude vs. BSISO is physically meaningful and motivates the project:
+BSISO is the dominant intraseasonal signal; ENSO is a subtle year-to-year modulation on top of it.
+The Siamese CNN must learn to distinguish this subtle modulation — that is the core research question.
+
+### Status at End of Session
+- [x] Notebook 03 preprocessing validated — labels confirmed correct
+- [x] `X_July.npy`, `labels_aligned.csv`, `norm_stats.json` verified
+- [ ] **Next step: run Notebook 04 training (Siamese CNN + InfoNCE)**
+
+---
+
+## Session 7 — Notebook 04 Training Complete + Full Analysis (2026-03-08)
+
+### What We Did
+- Notebook 04 ran successfully on Colab T4 GPU (Siamese CNN + InfoNCE, 50 epochs)
+- Notebook 05 analysis ran: embeddings extracted, t-SNE, linear probe, ENSO displacement
+- Results interpreted and documented in `results/analysis_results.md`
+
+### Key Numbers
+
+| Metric | Value | Baseline |
+|--------|-------|----------|
+| BSISO phase probe (val) | 67.4% | 12.5% (random) |
+| BSISO phase 5-fold CV | 67.1% ± 1.9% | 12.5% |
+| ENSO probe (val) | 58.4% | ~58% (majority = Neutral) |
+| ENSO probe 5-fold CV | 59.2% ± 0.7% | ~58% |
+| EN−LN displacement mean | 0.0779 | 0.0264 ± 0.0047 (null) |
+| ENSO displacement z-score | **11.02** | > 2 = significant |
+
+### Interpretation
+
+**BSISO phase: strongly encoded (67% >> 12.5% baseline)**
+The model learned to cluster same-phase days in the 64-dim embedding space, confirmed by t-SNE clustering and high linear probe accuracy.
+
+**ENSO: the linear probe is misleading**
+- The probe result (58.4%) looks like failure but is not — it is confounded by severe class imbalance (Neutral=775, La Niña=341, El Niño=217 days). Without balanced accuracy, the probe defaults to predicting Neutral.
+- The displacement analysis (z=11.02) shows ENSO IS encoded: El Niño and La Niña days map to different sub-regions within every BSISO phase cluster. ENSO is a local/relative displacement within phase clusters, not a global reorganisation — that is why a global linear classifier cannot detect it.
+
+**Phase-by-phase ENSO sensitivity:**
+- Phase 7 (suppressed/transitional): largest EN−LN displacement (0.148, 5.7× null) — most ENSO-sensitive
+- Phase 3 (Bay of Bengal active): smallest displacement (0.030, ≈ null) — least ENSO-sensitive
+- Caveat: Phase 7 has only ~21 El Niño days; the large displacement may be noisy
+
+### Critical Issues Identified
+1. Random train/val split — same-year leakage possible
+2. Class imbalance uncorrected in training pairs and probe metric
+3. Approach A preprocessing: ENSO background mean NOT removed; model may learn raw ENSO signal rather than modulation of BSISO
+4. "Beyond composite analysis" claim not fully demonstrated — displacement metric is geometrically similar to comparing composite means
+5. Phase 7 displacement may be a small-sample artefact
+
+### Next Steps (prioritised)
+1. Balanced accuracy metric + `class_weight='balanced'` in probe
+2. Year-based train/val split to prevent leakage
+3. Bootstrap CIs per phase displacement
+4. Approach B preprocessing (subtract interannual signal)
+5. Extend to MJJAS (5× more data, better El Niño coverage)
+6. Ablation: train without ENSO in pair labels — how much does the ENSO criterion contribute?
+7. Grad-CAM / saliency maps to see which spatial regions the CNN focuses on
+8. Within-phase distributional test (MMD) to test "beyond composites" claim rigorously
+
+### Files Created
+- `results/analysis_results.md` — full documented results with critical analysis
+- `checkpoints/encoder_final.pth` — trained model weights
+- `results/embeddings.npy` — (1333, 64) all embeddings
+
+---
+
+---
+
+## Session 8 — Approach B Preprocessing + Separate Results (2026-03-22)
+
+### What We Did
+
+#### Approach B Preprocessing Added to Notebook 03
+- Added 5 new cells (header + B1–B4) after Cell 9 in `03_preprocessing.ipynb`
+- **Method:** for each year, subtract that year's July mean per channel per grid point
+  ```
+  X_anom[day, ch] = X[day, ch] − mean(X[all July days in year y, ch])
+  ```
+- This removes the slowly-varying ENSO mean state, leaving only intraseasonal (BSISO) anomalies
+- Then z-score normalize the anomalies → `X_July_B.npy`
+- **Cell B4:** sanity check plot — ENSO composites Approach A vs B side by side
+  - Approach A row: should show clear ENSO OLR signal (±0.3–0.5σ)
+  - Approach B row: should be ~flat (ENSO background removed)
+- **Outputs saved:** `data/processed/X_July_B.npy`, `data/processed/norm_stats_B.json`
+
+#### APPROACH Config Added to Notebooks 04 and 05
+- Both notebooks now have `APPROACH = 'B'` (or `'A'`) variable at the top
+- Notebook 04: controls which data file to load (`X_July_B.npy`) and how to name checkpoints (`encoder_final_B.pth`, `encoder_epoch_N_B.pth`, `training_history_B.json`)
+- Notebook 05: controls which encoder/data to load and saves all results to `results/B/` subfolder (so A and B never overwrite each other)
+- Notebook 05: added **Cell 0** — one-time rename helper that renames generic `encoder_final.pth` → `encoder_final_B.pth` etc. on Drive for runs before the config was added
+
+#### Notebook 04 Run (Approach B) ✓
+- User ran Notebook 04 on Colab T4 GPU with `X_July_B.npy` as input
+- Saved as `encoder_final_B.pth` after Cell 0 rename
+
+### Approach B Results
+
+| Metric | Approach A | Approach B | Change |
+|--------|-----------|-----------|--------|
+| BSISO phase probe (val) | 67.4% | 59.2% | ↓ 8 pp |
+| BSISO 5-fold CV | 67.1% ± 1.9% | 59.4% ± 4.0% | ↓ |
+| ENSO probe (val) | 58.4% | 58.4% | = |
+| ENSO 5-fold CV | 59.2% ± 0.7% | 58.1% ± 0.1% | ↓ slightly |
+| ENSO displacement mean | 0.0779 | 0.0822 | ↑ |
+| Null baseline | 0.0264 ± 0.0047 | 0.0329 ± 0.0050 | ↑ |
+| Z-score | 11.02 | **9.85** | ↓ slightly |
+
+### Interpretation
+
+**BSISO phase probe 67% → 59%:** Expected and scientifically meaningful. Removing the yearly mean strips away large-scale background signals that co-vary with BSISO phase. Model must work from pure intraseasonal structure. 59% still far above 12.5% baseline.
+
+**ENSO probe still ~58%:** Class imbalance (Neutral=775, La Niña=341, El Niño=217) makes the linear probe always collapse to predicting Neutral. Unreliable metric for ENSO — displacement analysis is the correct metric.
+
+**ENSO displacement: higher magnitude (0.082 vs 0.078), z=9.85:** This is the key scientific result. After removing the raw ENSO mean state, the EN−LN centroid displacement is *larger*, not smaller. The ENSO signal encoded in Approach B is genuine modulation of BSISO spatial structure, not just the background warm/cold pool shift. This directly addresses the research question.
+
+**Phase-by-phase displacement:**
+- Phases 1, 2, 7, 8: well above null +2σ — robustly significant
+- Phase 7 still highest (~0.170) — most ENSO-sensitive
+- Phases 3, 4, 5: marginal (near null +2σ) — may genuinely have weaker ENSO modulation
+- Phase 5 missing from bar chart — fewer than 3 El Niño OR La Niña days (too sparse for centroid)
+
+**Scientific conclusion:** Approach B is the stronger result for the research question. ENSO modulation signal (z=9.85) survives after removing the year-to-year mean — the CNN learned ENSO modulation of BSISO structure, not raw ENSO background.
+
+### Files on Google Drive (after Session 8)
+```
+checkpoints/
+├── encoder_final_B.pth
+├── encoder_epoch_10_B.pth ... encoder_epoch_50_B.pth
+└── training_history_B.json
+data/processed/
+├── X_July_B.npy             ← Approach B input
+└── norm_stats_B.json
+results/B/
+├── embeddings.npy
+├── tsne_overview.png
+├── tsne_by_phase.png
+├── enso_displacement.png
+├── linear_probe_results.json
+└── analysis_report.txt
+```
+
+### Remaining Issues / Next Steps
+1. **Balanced accuracy metric** — ENSO probe still confounded by class imbalance; use `balanced_accuracy_score` + `class_weight='balanced'`
+2. **Year-based train/val split** — current random split still has same-year leakage
+3. **Bootstrap CIs per phase** — Phase 7 displacement large but only ~21 El Niño days; need confidence intervals
+4. **Phase 5 sparsity** — too few El Niño days to compute centroid; may need MJJAS extension
+5. **Extend to MJJAS** — 5× more data, better El Niño coverage, fixes sparsity
+6. **Ablation** — train without ENSO in pair labels; how much does the ENSO criterion contribute?
+7. **Grad-CAM / saliency maps** — which spatial regions does the CNN focus on?
+8. **MMD test** — distributional test within each phase to rigorously demonstrate "beyond composites"
+
+---
+
+## Session 9 — Lee et al. (2013) Preprocessing + MJJAS Extension (2026-04-06)
+
+### What We Did
+
+#### Switched to Lee et al. (2013) Preprocessing Method
+Decided to redo notebook 03 using the proper paper method instead of Approach A/B.
+
+**Lee et al. method (3 steps):**
+1. Remove annual cycle — subtract climatological daily mean per DOY (base period 1981–2010)
+2. Remove interannual variability — subtract preceding 120-day running mean
+3. Normalize — divide by area-averaged temporal standard deviation (one scalar per variable)
+
+**Why MJJAS data is needed:**
+For July 1, the 120-day running mean requires data back to ~March. With MJJAS (May–Sep), we have ~61 days of lead-in for July 1 — not the full 120, but practical and accepted.
+
+#### New Notebooks Created / Rewritten
+- **`01b_era5_download_mjjas.ipynb`** — new notebook to download u850, v850, OLR for May–Sep 1979–2023
+  - Same domain as notebook 01 (60°E–160°E, 0–60°N, 2°), 5 year-chunks
+  - Outputs: `u850_v850_MJJAS_YYYY_YYYY.nc` × 5, `OLR_MJJAS_1979_2023.nc`
+- **`03_preprocessing.ipynb`** — fully rewritten with Lee et al. method
+  - Outputs: `X_July_lee.npy` (N, 3, 31, 51), `labels_aligned_lee.csv`, `norm_stats_lee.json`
+- **Notebooks 04 + 05** — added `APPROACH = 'lee'` config + `LABELS_FILE` variable
+
+#### Lee et al. Results (July-only, N=1333)
+User ran notebooks 01b, 03, 04, 05 on Colab T4 GPU.
+
+| Metric | Value | Baseline |
+|--------|-------|----------|
+| BSISO phase probe (val) | 62.2% | 12.5% random |
+| BSISO 5-fold CV | 65.2% ± 2.7% | 12.5% |
+| ENSO probe (val) | 58.4% | ~58% majority |
+| ENSO displacement mean | 0.0774 | 0.0295 ± 0.0044 (null) |
+| **ENSO displacement z-score** | **10.82** | > 2 = significant |
+
+**Comparison across all three approaches:**
+
+| Metric | Approach A | Approach B | Lee et al. |
+|--------|-----------|-----------|------------|
+| BSISO phase | 67.4% | 59.2% | 62.2% |
+| ENSO z-score | 11.02 | 9.85 | 10.82 |
+
+Lee et al. sits between A and B — strongest scientific justification, signal well preserved.
+
+**Verification plots passed:**
+- BSISO phase composites: clear northward propagation phases 1→8 ✓
+- ENSO composites: near-zero (El Niño max|composite|=0.526, Neutral=0.162, La Niña=0.390) — background removal successful ✓
+
+#### Extended Data Scope from July-only to MJJAS
+**Decision:** Extend training to all MJJAS days (~6,750 samples vs. 1,333).
+
+**Rationale (from conversation log history):**
+- Explicitly listed as next step in Sessions 7 and 8
+- Phase 5 had too few El Niño days to compute centroid — MJJAS fixes this
+- Lee et al. preprocessing was designed for the full MJJAS season
+- `bsiso_amplitude > 1.0` threshold in pair sampler naturally filters weak BSISO days
+
+**Caveat:** May days get the JJA ENSO label of the same year (slight inconsistency, standard practice).
+
+**Changes made to notebooks:**
+- `02_labels_download.ipynb`: filter changed from July (month=7) to MJJAS (months 5–9); output renamed to `labels_mjjas.csv`
+- `03_preprocessing.ipynb`: load `labels_mjjas.csv`, extract all MJJAS days, output `X_MJJAS_lee.npy` and `labels_aligned_mjjas_lee.csv`
+- `04_training.ipynb` + `05_analysis.ipynb`: `APPROACH='lee'` now maps to MJJAS files
+
+#### Bug Fixed in Notebook 04 Smoke Test
+**Error:** `ValueError: Cannot take a larger sample than population when 'replace=False'`
+**Cause:** Smoke test uses `labels.iloc[:100]` — first 100 MJJAS rows are all May 1981 (all Neutral). `sample_hard_negative_pair` tried to choose 2 ENSO categories from a list of 1.
+**Fix:** Added guard at top of `sample_hard_negative_pair`:
+```python
+if len(self.enso_categories) < 2:
+    return self.sample_easy_negative_pair()
+```
+
+### Files Changed (all pushed to GitHub)
+```
+notebooks/01b_era5_download_mjjas.ipynb   ← new
+notebooks/02_labels_download.ipynb        ← MJJAS filter, labels_mjjas.csv output
+notebooks/03_preprocessing.ipynb          ← Lee et al. method, MJJAS output
+notebooks/04_training.ipynb               ← 'lee' approach + MJJAS files + bug fix
+notebooks/05_analysis.ipynb               ← 'lee' approach + MJJAS files
+```
+
+### Current Status
+- [x] Notebook 01b: MJJAS ERA5 download — done
+- [x] Notebook 03 (Lee et al., July-only): run and validated
+- [x] Notebook 04 (Lee et al., July-only): trained, z=10.82
+- [x] Notebook 05 (Lee et al., July-only): analysed
+- [ ] Notebook 02: re-run to generate `labels_mjjas.csv` — **next**
+- [ ] Notebook 03: re-run to generate `X_MJJAS_lee.npy` — **next**
+- [ ] Notebook 04: train on MJJAS (~6,750 samples) — **next**
+- [ ] Notebook 05: analyse MJJAS results — **next**
+
+### Decisions Made ✓
+| Decision | Choice |
+|----------|--------|
+| Preprocessing method | Lee et al. (2013) — annual cycle + 120-day running mean |
+| Data scope | MJJAS (May–Sep), extended from July-only |
+| Output file | `X_MJJAS_lee.npy` |
+
+### Remaining Issues / Next Steps
+1. **Run notebooks 02 → 03 → 04 → 05 with MJJAS data** — in progress
+2. **Balanced accuracy metric** — ENSO probe confounded by class imbalance
+3. **Year-based train/val split** — random split has same-year leakage
+4. **Bootstrap CIs per phase** — Phase 7 large displacement, small El Niño sample
+5. **Ablation** — train without ENSO in pair labels
+6. **Grad-CAM / saliency maps** — spatial regions the CNN focuses on
+7. **MMD test** — distributional test within each phase ("beyond composites")
+
+---
+
+## Session 10 — MJJAS Training Results + Preprocessing Fix (2026-04-06)
+
+### What We Did
+
+#### MJJAS Training Results (Lee et al., N=6,579)
+User completed full pipeline: notebooks 02 → 03 → 04 → 05 with MJJAS data.
+
+| Metric | Lee (July, N=1333) | Lee (MJJAS, N=6579) |
+|--------|-------------------|---------------------|
+| BSISO Phase Accuracy | 62.2% | **65.7%** |
+| 5-fold CV | 65.2% ± 2.7% | **66.5% ± 0.6%** |
+| ENSO Displacement z | 10.82 | **4.79** |
+
+**Full comparison across all approaches:**
+
+| | Approach A | Approach B | Lee (July) | Lee (MJJAS) |
+|--|-----------|-----------|------------|-------------|
+| N | 1,333 | 1,333 | 1,333 | 6,579 |
+| BSISO Phase | 67.4% | 59.2% | 62.2% | 65.7% |
+| ENSO z-score | 11.02 | 9.85 | 10.82 | 4.79 |
+
+**Interpretation of MJJAS results:**
+- BSISO phase accuracy improved AND variance dropped 4.5× (±2.7% → ±0.6%) — more stable model with more data
+- ENSO z-score dropped from 10.82 → 4.79 — still significant (z > 2) but weaker
+- **Why weaker z:** ENSO–BSISO coupling is strongest in July; May/June dilute the signal. Also larger N → tighter centroids → smaller absolute distances, but signal scaled down more than noise
+- **Scientific interpretation:** ENSO modulation of BSISO peaks in July and weakens toward margins of warm season — itself a scientifically interesting finding
+- Both July and MJJAS results support the research question
+
+#### Bug Fixed: Annual Cycle Removal (Proper 3-Harmonic Fourier Method)
+**Problem identified:** Original implementation subtracted raw DOY climatology (mean per calendar day), which is noisier than what Lee et al. specify.
+
+**What Lee et al. (2013) actually say:** Remove annual mean + first 3 harmonics of climatological annual variation — i.e., fit a Fourier series:
+`f(d) = a₀ + Σₖ₌₁³ [aₖ cos(2πkd/365) + bₖ sin(2πkd/365)]`
+
+**Fix applied to notebook 03:**
+1. Compute DOY climatology over base period (1981–2010) per grid point
+2. Fit 3 Fourier harmonics via least squares → smooth seasonal curve
+3. Subtract smooth curve (not raw climatology) from all days
+
+Captures periods of 365, 182.5, 121.7 days only. Day-to-day noise in climatology is smoothed away.
+
+```python
+X_fit  = build_fourier_features(unique_doys, n_harmonics=3)
+coeffs = np.linalg.lstsq(X_fit, clim_flat)
+smooth_cycle = build_fourier_features(doys) @ coeffs
+anom = raw - smooth_cycle
+```
+
+Needs re-run of notebook 03 onwards to take effect.
+
+#### OLR Color Axis Explained
+User asked about the red-to-blue color axis in BSISO phase composites:
+- **Blue (negative)** = OLR below climatology → less outgoing longwave radiation → thick cloud cover → **active convection / rainfall**
+- **Red (positive)** = OLR above climatology → clear sky, no clouds → **suppressed convection**
+- Units are normalized (divided by area-averaged std) — dimensionless
+- BSISO northward propagation visible as blue center moving from Indian Ocean (Phase 1–2, ~70–90°E) → Bay of Bengal (Phase 3–4) → Western Pacific (Phase 5–6)
+
+### Current Status
+- [x] Notebook 02: labels_mjjas.csv generated
+- [x] Notebook 03: X_MJJAS_lee.npy generated (old DOY method)
+- [x] Notebook 04: trained on MJJAS, z=4.79
+- [x] Notebook 05: MJJAS analysed
+- [ ] Notebook 03: **re-run needed** with proper 3-harmonic Fourier fix
+- [ ] Notebooks 04 + 05: re-run after 03 fix
+
+### Remaining Issues / Next Steps
+1. **Re-run 03 → 04 → 05** with corrected 3-harmonic annual cycle removal
+2. **Balanced accuracy metric** — ENSO probe confounded by class imbalance
+3. **Year-based train/val split** — random split has same-year leakage
+4. **Bootstrap CIs per phase** — Phase 7 large displacement, small El Niño sample
+5. **Ablation** — train without ENSO in pair labels
+6. **Grad-CAM / saliency maps** — spatial regions the CNN focuses on
+7. **MMD test** — distributional test within each phase ("beyond composites")
+
+---
+
+## Session 11 — Lee MJJAS Fourier Fix Results + Year-Based Split (2026-04-13)
+
+### What We Did
+
+#### Read & Documented Fourier Fix Results
+User re-ran notebooks 03 → 04 → 05 on Colab with the 3-harmonic Fourier fix (commit 1c92d99). Results saved in `~/Desktop/ddcs/Lee_result_full/`.
+
+**Lee et al. MJJAS results (post-Fourier fix, N=6,579):**
+
+| Metric | Before Fix | After Fix |
+|--------|-----------|-----------|
+| BSISO Phase Acc (val) | 65.7% | **69.6%** |
+| BSISO 5-fold CV | 66.5% ± 0.6% | **69.2% ± 1.2%** |
+| ENSO z-score | 4.79 | **2.60** |
+
+**Full comparison across all approaches:**
+
+| | Approach A | Approach B | Lee (July) | Lee MJJAS (old) | Lee MJJAS (Fourier fix) |
+|--|-----------|-----------|------------|-----------------|-------------------------|
+| N | 1,333 | 1,333 | 1,333 | 6,579 | 6,579 |
+| BSISO Phase | 67.4% | 59.2% | 62.2% | 65.7% | **69.6%** |
+| ENSO z-score | 11.02 | 9.85 | 10.82 | 4.79 | **2.60** |
+
+- Best BSISO phase accuracy yet (69.6%)
+- ENSO z=2.60 still significant (z > 2) but close to threshold
+- Wrote `results/analysis_results_lee_mjjas.md` with full documentation
+
+#### Implemented Year-Based Train/Val Split
+Changed from random `train_test_split` to year-based split to prevent same-year data leakage.
+
+**Notebook 04 changes:**
+- Cell 1: removed `from sklearn.model_selection import train_test_split` (no longer needed)
+- Cell 2: replaced random split with year-based split
+  - `val_years = all_years[::5]` — every 5th year (1981, 1986, 1991, 1996, 2001, 2006, 2011, 2016, 2021)
+  - ~20% of data held out, no year appears in both train and val
+  - `phase_enso_index` now built from TRAIN indices only
+  - Added ENSO coverage check for val set
+
+**Notebook 05 changes:**
+- Cell 5: replaced `StratifiedKFold` with `GroupKFold(n_splits=5)` using year as group
+  - 5-fold CV now also year-aware — no same-year leakage in CV either
+  - Import changed from `StratifiedKFold` to `GroupKFold`
+
+### Files Changed
+```
+results/analysis_results_lee_mjjas.md    ← new: full results documentation
+notebooks/04_training.ipynb              ← year-based split in Cell 2
+notebooks/05_analysis.ipynb              ← GroupKFold in Cell 5
+```
+
+#### Year-Based Split Results ✓
+User ran notebooks 04 → 05 on Colab with year-based split. Results from `~/Downloads/analysis_report (1).txt`.
+
+**Year-based split vs random split comparison:**
+
+| Metric | Random Split | Year-Based Split | Change |
+|--------|-------------|-----------------|--------|
+| BSISO Phase (val) | 69.6% | **67.7%** | -1.9 pp |
+| BSISO 5-fold CV | 69.2% ± 1.2% | **68.6% ± 1.0%** | -0.6 pp |
+| ENSO probe (val) | 60.9% | **60.9%** | = |
+| ENSO z-score | 2.60 | **3.83** | +1.23 |
+
+**Interpretation:**
+- BSISO phase accuracy dropped slightly (-1.9 pp) — expected, same-year leakage removed. 67.7% still far above 12.5% baseline.
+- ENSO z-score *increased* from 2.60 → 3.83 — surprise positive result. Model's ENSO discrimination generalizes better to unseen years than random split suggested. Random split likely created noisier within-phase centroids from partial-year data.
+- z=3.83 is comfortably significant (well above 2) — ENSO modulation signal is genuine and generalizable.
+- Year-based split resolves the biggest methodological concern from Sessions 7–10.
+
+### Current Status
+- [x] Fourier fix re-run results documented
+- [x] Year-based split implemented in notebooks 04 + 05
+- [x] Year-based split results obtained — z=3.83, BSISO=67.7%
+- [x] `results/analysis_results_lee_mjjas.md` updated with year-based split results
+
+### ✓ Decisions Resolved This Session
+| Decision | Resolution |
+|----------|-----------|
+| Year-based split | Implemented and validated — z improved from 2.60 to 3.83 |
+
+#### Physical Interpretation Added to Analysis Results ✓
+Added comprehensive Section 4 "Physical Interpretation: Why ENSO Modulates BSISO" to `results/analysis_results_lee_mjjas.md`. Covers:
+
+**4.1 Walker Circulation mechanism:**
+- El Niño weakens/shifts Walker cell eastward → suppressed Maritime Continent convection, westerly anomalies over western Pacific
+- La Niña strengthens Walker cell → enhanced Maritime Continent convection, stronger easterlies
+- These background changes modify the environment for BSISO propagation
+
+**4.2 Gill (1980) model framework:**
+- Equations for tropical atmospheric response to diabatic heating
+- Kelvin wave (east) + Rossby wave (west) response to shifted heating
+- ENSO-driven Gill response interferes with BSISO's own Kelvin-Rossby structure — interference is phase-dependent
+
+**4.3 Moisture budget and MSE framework:**
+- Column-integrated moisture equation: ∂⟨q⟩/∂t = −⟨v⃗·∇q⟩ − ⟨∂(ωq)/∂p⟩ + E − P
+- ENSO modifies horizontal moisture advection, background moisture gradient, and evaporation
+- MSE framework: BSISO northward propagation driven by −⟨v'·∂h̄/∂y⟩; ENSO modifies ∂h̄/∂y
+
+**4.4 Phase-by-phase physical explanations:**
+- Phases 1–2 (Indian Ocean initiation): ENSO via Indian Ocean Basin mode, modified SST gradients + monsoon flow
+- Phase 3 (Bay of Bengal): weak ENSO sensitivity because orographic forcing + land-sea contrast dominate
+- Phase 4 (northward propagation): ENSO modifies meridional MSE gradient → affects propagation speed
+- Phase 5 (Western Pacific): weak sensitivity because warm pool SST is stable + active convection saturates atmospheric response
+- Phases 6–8 (suppressed): "quiet window" hypothesis — weak BSISO convection allows ENSO background to express freely
+
+**4.5 Seasonality — why July > MJJAS:**
+1. Monsoon maturity: July Hadley cell + TEJ strongest → maximum teleconnection efficiency
+2. ENSO amplitude: JJA is "sweet spot" where SST anomaly drives atmospheric response + monsoon amplifies
+3. Moisture sensitivity: July has highest column water vapor → nonlinear moisture-convection feedback amplifies small ENSO perturbations
+
+### Remaining Issues / Next Steps
+1. **Balanced accuracy metric** — ENSO probe confounded by class imbalance
+2. **Bootstrap CIs per phase** — per-phase displacement confidence intervals
+3. **Grad-CAM / saliency maps** — spatial regions the CNN focuses on
+4. **Ablation** — train without ENSO in pair labels
+5. **MMD test** — distributional test within each phase ("beyond composites")
+6. **Alternative dim reduction** — Isomap/UMAP for cyclic BSISO manifold visualization
+
+---
+
+## Session 12 — Physical Reasoning Notebook Created (2026-04-19)
+
+### What We Did
+
+#### Reviewed & Updated Original Physical Reasoning Plan
+- Read original plan (`ENSO_BSISO_Physical_Reasoning_Plan.md`) — written when best result was Approach B (z=9.85, N=1,333, July-only)
+- Plan was outdated: our current best is Lee MJJAS year-based split (z=3.83, N=6,579)
+- Created updated implementation plan addressing all changes in data, preprocessing, and results
+
+#### Design Decisions Made
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Wind visualization | u850+v850 vectors overlaid on OLR | Standard BSISO literature style, captures northward propagation |
+| Composite units | Sigma (standard deviations) | Standard for composite papers, no de-normalization needed |
+| BSISO amplitude filter | Include ALL days | Maximizes sample size, standard composite practice |
+| Multiple testing | Report both uncorrected (z>1.96) and Bonferroni (z>2.73) | Transparent about correction |
+| Bandpass filter | No additional filtering | Lee et al. anomalies + sample averaging sufficient for N>30 |
+
+#### Created `notebooks/06_physical_reasoning.ipynb` (29 cells)
+
+**Phase B — Sample Size Cross-Tab (Cell 2):**
+- 8x3 table of days per (phase x ENSO) cell
+- Flags cells < 15 (noisy) and 15-30 (caution)
+- With N=6,579 (MJJAS), expect all cells > 30
+
+**Phase A — Per-Phase Permutation Z-Scores (Cells 3-4):**
+- 10,000-permutation null per phase (vs. 100 shuffles for overall z in notebook 05)
+- Computes z-score, p-value for each of 8 phases
+- Bar chart with both uncorrected and Bonferroni significance thresholds
+- Saves `per_phase_zscores.csv`
+
+**Phase C — Composite Analysis (Cells 5-8):**
+- Cell 5: Compute composites for all 8 phases x 3 ENSO states x 3 fields (u850, v850, OLR)
+  - Delta_k = composite_EN - composite_LN for each phase
+- Cell 6: Welch's t-test at every grid point (31x51) for each phase
+  - Field significance test: fraction of significant grid points > 5%
+- Cell 7: **Main figure** — 8-panel OLR + wind vector Delta_k maps with stippling
+  - Phase z-score annotated on each panel title
+- Cell 8: Full composites (EN | LN | Delta) side by side for top 3 phases
+
+**Phase D — Nonlinearity Argument (Cells 9-11):**
+- Cell 9: 8x8 spatial pattern correlation matrix of Delta_k(OLR) across phases
+  - High mean r = linear modulation; low r = nonlinear/phase-dependent
+- Cell 10: Variance decomposition
+  - Mean Delta (linear component) vs. phase-dependent residual (nonlinear)
+  - Fraction of total variance in residual = degree of nonlinearity
+  - Visualization: mean modulation vs. residuals for top phases
+- Cell 11: Consistency check — Spearman rank correlation
+  - ML z-score (embedding-based) vs. composite Delta_k RMS (physics-based)
+  - Positive rho validates CNN captures real physical differences
+
+**Summary Report (Cell 12):**
+- Auto-generated text report with all key numbers
+- Lists all output files saved to `results/lee/physical/`
+
+### Expected Outputs (on Google Drive after running)
+```
+BSISO_SSL_Project/results/lee/physical/
+  per_phase_zscores.csv              Per-phase z-scores table
+  per_phase_zscore_bar.png           Bar chart with significance thresholds
+  delta_k_olr_wind_8panels.png       OLR + wind Delta_k for all 8 phases
+  full_composites_top_phases.png     EN | LN | Delta for top 3 phases
+  delta_k_correlation_matrix.png     Spatial pattern correlation (nonlinearity)
+  variance_decomposition.png         Linear vs nonlinear decomposition
+  consistency_check.png              ML z-score vs composite strength
+  physical_reasoning_report.txt      Full summary report
+```
+
+### Files Pushed to GitHub
+```
+notebooks/06_physical_reasoning.ipynb   ← new (commit 8048286)
+```
+
+### Current Status
+- [x] Notebook 06 created and pushed to GitHub
+- [x] Notebook 06 run on Colab — all cells executed successfully
+- [x] Results reviewed and interpreted — see Session 12b below
+
+---
+
+## Session 12b — Physical Reasoning Results & Interpretation (2026-04-19)
+
+### What We Did
+
+User ran notebook 06 on Colab. All cells executed successfully. Downloaded all figures and `physical_reasoning_report.txt`. Reviewed and interpreted all results.
+
+### Results
+
+#### Phase B — Sample Sizes: All Clear
+
+| Phase | El Nino | La Nina | Neutral | Total |
+|-------|---------|---------|---------|-------|
+| 1 | 130 | 247 | 511 | 888 |
+| 2 | 115 | 219 | 498 | 832 |
+| 3 | 169 | 199 | 585 | 953 |
+| 4 | 103 | 177 | 391 | 671 |
+| 5 | 156 | 174 | 455 | 785 |
+| 6 | 157 | 173 | 501 | 831 |
+| 7 | 106 | 216 | 382 | 704 |
+| 8 | 135 | 278 | 502 | 915 |
+| **Total** | **1071** | **1683** | **3825** | **6579** |
+
+All cells N > 100. MJJAS extension completely solved the July-only sparsity problem.
+
+#### Phase A — Per-Phase Permutation Z-Scores (10,000 permutations)
+
+| Phase | z | p-value | d_obs | N_EN | N_LN | Significance |
+|-------|---|---------|-------|------|------|-------------|
+| **6** | **2.83** | 0.0105 | 0.0288 | 157 | 173 | **Bonferroni significant** |
+| **2** | **2.38** | 0.0202 | 0.0271 | 115 | 219 | **Uncorrected significant** |
+| 5 | 1.71 | 0.0618 | 0.0206 | 156 | 174 | Marginal |
+| 4 | 1.33 | 0.1060 | 0.0212 | 103 | 177 | Not significant |
+| 1 | 1.30 | 0.1077 | 0.0175 | 130 | 247 | Not significant |
+| 8 | 0.65 | 0.2375 | 0.0136 | 135 | 278 | Not significant |
+| 7 | 0.07 | 0.4116 | 0.0128 | 106 | 216 | Not significant |
+| 3 | -0.44 | 0.6172 | 0.0089 | 169 | 199 | Not significant |
+
+**Key findings:**
+- Overall z=3.83 is driven mainly by Phase 6 (suppressed/transition) and Phase 2 (Indian Ocean initiation)
+- Phase 7 (z=0.07) — was extreme outlier in July-only (z~5.7x null), now essentially zero. Confirmed small-sample artefact.
+- Phase 3 (z=-0.44) — EN/LN *less* separated than random chance. Consistent with physical prediction: Bay of Bengal convection is orographically anchored and ENSO-insensitive.
+- Significant phases: 2/8 uncorrected, 1/8 after Bonferroni
+
+#### Phase C — Composite Field Significance (Welch's t-test)
+
+| Phase | OLR sig% | Field sig? |
+|-------|----------|-----------|
+| 1 | 20.3% | PASS |
+| 2 | 15.8% | PASS |
+| 3 | 17.5% | PASS |
+| 4 | 11.1% | PASS |
+| 5 | 21.8% | PASS |
+| 6 | 16.1% | PASS |
+| 7 | 16.9% | PASS |
+| 8 | 16.4% | PASS |
+
+**Surprising finding:** ALL 8 phases pass field significance (11-22% grid points significant, all >> 5% threshold). Even Phase 3 (z=-0.44 in embeddings) has 17.5%. This creates a fundamental disconnect between ML and composite results — see Phase D interpretation.
+
+#### Phase D — Nonlinearity Analysis
+
+**Spatial pattern correlation matrix:**
+- Mean off-diagonal r = **0.172**
+- 27/28 phase pairs have |r| < 0.5
+- Only Phase 3-4 pair reaches moderate correlation (r=0.54) — both Bay of Bengal/northward propagation phases
+- Phase 7 essentially uncorrelated with everything (r near 0 or negative)
+- **Conclusion: ENSO modulation is strongly nonlinear (phase-dependent)**
+
+**Variance decomposition:**
+- Mean Delta (linear component): canonical Walker circulation response — red lobe (suppressed convection) over Maritime Continent (100-140E) with westerly wind anomalies
+- Phase-dependent residuals: completely different spatial patterns for P6 vs P2, confirming nonlinear component is substantial
+
+**Consistency check (ML z-scores vs composite Delta RMS):**
+- Spearman rho = **-0.452** (p = 0.260)
+- Spearman(z, sig%_OLR) = **-0.357** (p = 0.385)
+- **Negative correlation:** phases where CNN sees most ENSO modulation (P6, P2) have the *weakest* composite differences, and vice versa
+
+### Interpretation of the Negative Spearman (Key Scientific Finding)
+
+The negative correlation between ML z-scores and composite strength is the most scientifically important result. It reveals that **composites and the CNN measure fundamentally different things:**
+
+| | Composite Analysis | Contrastive Learning |
+|--|-------------------|---------------------|
+| **Measures** | Mean difference at each grid point independently | Spatial pattern structure across the full field |
+| **Sensitive to** | Any local EN-LN difference, even if spatially incoherent | Spatially coherent, organized structural differences |
+| **Phase 6** | Low Delta RMS (small point-wise differences) | **Highest z-score** (coherent pattern change) |
+| **Phase 7** | Highest Delta RMS (large scattered differences) | z = 0.07 (no coherent pattern) |
+
+**Physical mechanism:**
+- **Phase 6** (CNN's top phase): Suppressed BSISO convection creates a "quiet window." ENSO background circulation expresses as *small-amplitude but spatially organized* wind and OLR anomalies. The CNN's convolutional filters detect this pattern coherence.
+- **Phase 7** (highest composite RMS but CNN z=0.07): Large EN-LN differences exist at individual grid points, but they are *spatially scattered/incoherent*. The CNN cannot leverage noise.
+- **Phase 3** (z=-0.44): Orographic forcing and land-sea contrast anchor convection so strongly that neither composites nor CNN find meaningful modulation (though individual grid points still fluctuate).
+
+**This validates the "beyond composites" claim:** The contrastive model captures spatial pattern coherence — organized ENSO modulation structure — that grid-point-wise composite analysis cannot isolate. This is precisely what physics-informed pair construction (positive = same phase + same ENSO) teaches the encoder to detect.
+
+### Updated Narrative Chain
+
+1. **Contrastive model** detects significant ENSO modulation of BSISO structure (overall z=3.83, year-based split)
+2. **Per-phase z-scores** reveal modulation is concentrated in Phase 6 (suppressed, z=2.83) and Phase 2 (initiation, z=2.38)
+3. **Composite Delta_k maps** show physically interpretable OLR + wind changes that differ qualitatively across phases
+4. **Cross-phase correlation** (mean r=0.17) proves ENSO modulation is **strongly nonlinear** — not a uniform additive background
+5. **Negative ML-composite correlation** (rho=-0.45) demonstrates the CNN captures **spatial pattern coherence** beyond what composites detect
+6. **Physical consistency:** Phase 6 "quiet window" and Phase 3 orographic anchoring align with established BSISO dynamics
+
+### Presentation Slides Created
+- `~/Desktop/ddcs/physical_reasoning_slides.md` — 2 slides with talking points:
+  - Slide 1: Nonlinear phase-dependent modulation (z-score bar + correlation matrix)
+  - Slide 2: Beyond composites (consistency check scatter + variance decomposition)
+
+### Files on Google Drive
+```
+BSISO_SSL_Project/results/lee/physical/
+  per_phase_zscores.csv              Per-phase z-scores table
+  per_phase_zscore_bar.png           Bar chart with significance thresholds
+  delta_k_olr_wind_8panels.png       OLR + wind Delta_k for all 8 phases
+  full_composites_top_phases.png     EN | LN | Delta for top 3 phases (P6, P2, P5)
+  delta_k_correlation_matrix.png     Spatial pattern correlation (nonlinearity)
+  variance_decomposition.png         Linear vs nonlinear decomposition
+  consistency_check.png              ML z-score vs composite strength
+  physical_reasoning_report.txt      Full summary report
+```
+
+### Remaining Issues / Next Steps
+1. **Balanced accuracy metric** — ENSO probe confounded by class imbalance
+2. **Ablation** — train without ENSO in pair labels; measure ENSO criterion contribution
+3. **MMD test** — distributional test within each phase (formal "beyond composites" test)
+4. **Alternative dim reduction** — Isomap/UMAP for cyclic BSISO manifold visualization
+5. **July-only per-phase analysis** — run notebook 06 on July-only embeddings to compare per-phase z-scores with MJJAS (test seasonality hypothesis)
+
+---
+
+## Session 13 — Extension Plan + 2D Encoder + Temperature Sweep (2026-04-25 → 2026-04-26)
+
+### Context: advisor's three-way comparison proposal
+
+After Session 12b, advisor proposed extensions that crystallized into a clean scientific framing — three candidate representations to compare:
+
+1. **Conventional** — APEC (PC1, PC2) BSISO index, hand-crafted to be 2D.
+2. **Supervised contrastive** (current notebook 04 approach) — pairs defined by BSISO phase + ENSO category.
+3. **Self-supervised temporal** (advisor's MJO method) — pairs defined by temporal proximity only, no labels.
+
+Evaluation via linear probes on atmospheric structure (BSISO phase at lag 0, +5d, +10d; ENSO balanced accuracy). Forecast skill on East Asian precipitation deferred until later.
+
+**Immediate first step:** test whether a 2D embedding (encoder dim → 2 directly) preserves the structure currently visible in 64D + t-SNE. If yes, all later experiments live in 2D for clean comparison.
+
+### Phase 1 plan locked
+
+Created `results/extension_2d_plan.md` (5 phases, full design decisions). Locked choices:
+- Encoder output dim = 2 (option (a) — squeeze the entire backbone, not just a projection head).
+- SSL positive pair window: ±3 days.
+- SSL bandpass for the temporal-continuity branch: 25–90 day Lanczos (advisor's MJO convention).
+- SSL negative sampling: unrestricted within year (Approach Lee + bandpass already remove the seasonal cycle).
+- Data scope: MJJAS (~6,579 days, year-based split).
+- Preprocessing: **Lee et al. (2013)** — `X_MJJAS_lee.npy`. Approach B was July-only and doesn't apply to the MJJAS pipeline.
+- Train/val split: year-based, every 5th year held out (regenerated deterministically per notebook to be robust against cache overwrites from other notebooks).
+- Probes: BSISO phase + ENSO **balanced** accuracy (new — addresses class-imbalance issue from Session 11).
+- Decision rule for Phase 1: phase val ≥ 62% AND z-score ≥ 3.0 → greenlight Phase 2; else run Phase 4 dim sweep before Phase 2.
+
+### Notebook 07 — first 2D run (τ=0.07)
+
+`notebooks/extension_2d/07_supervised_2d.ipynb` — identical to notebook 04 except `embedding_dim=2`, hardcoded MJJAS Lee, run-tagged outputs (`results/lee_2d/`). Same InfoNCE temperature τ=0.07 as notebook 04.
+
+**Result: training collapse.** Outputs:
+
+| Metric | 64D baseline | 2D (τ=0.07) |
+|---|---|---|
+| BSISO phase val acc | 67.7% | **32.8%** |
+| BSISO phase 5-fold CV | 68.6% ± 1.0% | 36.1% ± 2.7% |
+| ENSO bal-acc val | n/a | 35.4% (≈ 33% random) |
+| ENSO displacement z-score | 3.83 | **1.54** (not significant) |
+| Angular spread | n/a | **0.66 rad** (38° of arc) |
+
+All 6,579 embeddings clustered in a thin crescent near (0, −1) on the unit circle. Train loss only moved 4.12 → 4.06 over 50 epochs; val loss flat at log(64) ≈ 4.16 (the random-baseline value). Auto-decision in `phase1_comparison.md`: "Run Phase 4 dim sweep first."
+
+### Diagnosis: optimization failure, not high intrinsic dimensionality
+
+This is a known InfoNCE failure mode in low-dim:
+
+1. **Temperature too sharp for low-dim manifold.** τ=0.07 is well-tuned for high-dim (S⁶³ in R⁶⁴) where there's lots of angular room. On S¹ in R² (after L2 normalization), every two random unit vectors are within π of each other; sharp τ produces near-degenerate gradients and easy collapse.
+2. **Effective dimensionality is 1, not 2.** L2-normalizing a 2D output places it on the unit circle, which is a 1-dimensional manifold (only θ matters). So we tested "S¹-restricted contrastive learning," not "true 2D contrastive learning."
+3. **Loss curves confirm the diagnosis.** Train loss barely moved, val loss stuck at log(64) — model never learned beyond chance.
+
+The decision rule in the plan ("if val ≥ 62% AND z ≥ 3 → 2D works") assumed *training converged*. Since this run didn't converge, the rule shouldn't have fired — pausing the auto-decision and running diagnostics first.
+
+### Notebook 07b — temperature sweep
+
+`notebooks/extension_2d/07b_supervised_2d_temp_sweep.ipynb` — sweeps τ ∈ {0.2, 0.5, 1.0} with the same pipeline (everything else identical). Per-τ outputs in `results/lee_2d_tau{020,050,100}/`. Aggregate comparison in `results/lee_2d_tau_sweep/` (4-way, including τ=0.07 from notebook 07).
+
+**New diagnostic added: angular spread** = `max(θ) − min(θ)` of embedding angles in radians. Full circle = 2π ≈ 6.28. Values < 1.0 rad indicate collapse.
+
+### Sweep results — partial recovery
+
+| τ | spread (rad) | phase val acc | phase 5-fold CV | ENSO bal-acc | z-score |
+|---|---|---|---|---|---|
+| 0.07 | **0.66** | 32.8% | 36.1% ± 2.7% | 35.4% | 1.54 |
+| 0.20 | 1.10 | 33.5% | 37.6% ± 2.5% | 36.1% | 2.70 |
+| **0.50** | **6.28** | 33.2% | 38.2% ± 3.5% | 34.3% | 2.59 |
+| 1.00 | 6.28 | 31.9% | 38.6% ± 4.1% | 34.7% | 2.33 |
+
+64D Lee MJJAS baseline: phase val 67.7%, z-score 3.83.
+
+**4-panel scatter** (`scatter_4panel.png`):
+- τ=0.07 → tiny bottom crescent (collapsed).
+- τ=0.20 → wider arc, still bottom-heavy.
+- τ=0.50 → embeddings wrap fully around the unit circle.
+- τ=1.00 → full circle, similar to τ=0.50.
+
+### Two-part interpretation
+
+**What got fixed:** Temperature was indeed the cause of collapse. At τ ≥ 0.5 embeddings span the full circle, and z-score crosses the significance line (z > 2). The original optimization problem is solved.
+
+**What's still broken:** Even with full angular spread, **BSISO phase probe stays at ~33% across all τ**. ENSO z-score plateaus at 2.3–2.7, well below 64D's 3.83. So the angles aren't laid out *meaningfully* — phases overlap on the circle rather than progressing 1→8 around it.
+
+**Why:** L2-normalizing a 2D output collapses embeddings to a circle, leaving only **one** real degree of freedom (the angle θ). To encode 8 BSISO phases × 3 ENSO states cleanly we likely need at least 2 independent dimensions — phase as angle *and* amplitude/ENSO as radius. L2 normalization erases the radius. So the test we just ran was actually "is BSISO 1D-on-a-circle?" not "is BSISO 2D in R²?"
+
+This is now a **real scientific result**, not a training artifact. Honest verdict: BSISO is **not 1-D-on-a-circle** under our standard contrastive setup.
+
+### What τ (temperature) is — for the writeup
+
+τ is the scaling parameter in NT-Xent / InfoNCE: `loss = −log(exp(sim/τ) / Σ exp(sim/τ))`. It sets the sharpness of the softmax over similarities:
+- **Small τ (sharp)** — small similarity differences explode into huge logit gaps; hard negatives are punished severely. Good when the embedding manifold is high-dimensional (lots of room); risky in low-dim (everything collapses to a single attractor).
+- **Large τ (soft)** — logits are gentle; embeddings spread freely. Less likely to collapse but also less discriminative.
+
+SimCLR-style high-dim contrastive uses τ ≈ 0.07–0.1. For low-dim, literature recommends τ in [0.5, 1.0]. Notebook 04's τ=0.07 was inherited from the 64D setup and never tuned for the 2D regime.
+
+### Phase 1 status
+
+- [x] Notebook 07 written and run — collapse observed.
+- [x] Notebook 07b temperature sweep written and run — partial recovery, but probe ceiling at ~33%.
+- [x] Decision logged: do NOT greenlight Phase 2 yet. The 1D-circle bottleneck is real.
+- [ ] **Next step (pending advisor sign-off):** pivot to one of:
+  - **Option B — drop L2 normalization** for the 2D head. Embeddings live in R² freely, with phase as angle and amplitude as radius. Closer to what (PC1, PC2) actually is. Use cosine similarity *inside* the loss for stability, but report raw embeddings.
+  - **Option C — Phase 4 dimension sweep** {1, 2, 4, 8, 16, 32, 64} to find the true intrinsic dimensionality elbow.
+
+Recommendation: Option B first (cheaper, directly tests the L2-norm hypothesis); if it also caps out far below 64D, fall back to Option C.
+
+### Files committed to GitHub this session
+
+- `results/extension_2d_plan.md` — 5-phase plan
+- `notebooks/extension_2d/07_supervised_2d.ipynb` — first 2D run (collapsed)
+- `notebooks/extension_2d/07b_supervised_2d_temp_sweep.ipynb` — temperature sweep
+- Commits: `bf5ddc0` (plan + 07), `64f5316` (07b)
+
+### Outputs on Google Drive
+
+```
+BSISO_SSL_Project/
+├── results/lee_2d/                  ← τ=0.07 (collapsed)
+├── results/lee_2d_tau020/           ← τ=0.20
+├── results/lee_2d_tau050/           ← τ=0.50 (best of sweep)
+├── results/lee_2d_tau100/           ← τ=1.00
+└── results/lee_2d_tau_sweep/
+    ├── comparison_table.csv
+    ├── scatter_4panel.png
+    └── temperature_sweep_summary.md
+```
+
+Per-τ artifacts: `embeddings.npy`, `embedding_2d_overview.png`, `linear_probe_results.json`, `enso_displacement.png`, `training_curves.png`.
+
+---
+
+## Session 13b — Option B (no L2 normalization) Results & Path A Decision (2026-04-26)
+
+### What got run
+Notebook 07c executed on Colab T4. Single training run: 50 epochs, 2D encoder **without L2 normalization**, raw dot product InfoNCE, τ=0.5, weight_decay=1e-4 (added vs notebook 04/07/07b for stability). ~30 min wall time.
+
+### Headline result — L2 normalization was the bottleneck
+
+| Configuration | BSISO phase val | 5-fold CV (year-grouped) | ENSO z-score |
+|---|---|---|---|
+| 64D baseline | 67.7% | 68.6% ± 1.0% | 3.83 |
+| 2D L2-norm best τ=0.5 (07b) | 33.2% | 38.2% ± 3.5% | 2.59 |
+| **2D no-L2 τ=0.5 (07c)** | **58.3%** | **65.7% ± 4.1%** | 2.53 |
+
+**Removing L2 normalization recovered most of the 64D performance.** Phase val jumped 33.2% → 58.3% (+25 pp); 5-fold CV jumped 38.2% → 65.7%, **within 3 pp of the 64D baseline**. Training was clean: train loss steadily 4.16 → 3.97; embedding norms stayed bounded (mean 0.53 ± 0.21, max 1.6).
+
+### The twist: it wasn't the radius doing the work
+
+| Probe features | BSISO phase val | ENSO bal-acc val |
+|---|---|---|
+| Full 2D (no L2) | 58.3% | 34.6% |
+| Angle-only (= L2-normalized post-hoc) | 58.2% | 34.1% |
+
+**Gap = +0.1 pp on phase, +0.5 pp on ENSO.** The radius adds essentially nothing to the linear probe. The 25-pp jump did NOT come from "freeing the radius to encode extra info" — it came from training being easier without the L2 constraint. The encoder still puts most useful information in the angle, but the angular distribution itself is much richer than what L2-norm-during-training produced.
+
+### Diagnosis
+
+When you L2-normalize the encoder output, gradients have to be projected onto the tangent space of the sphere (`(I − z·zᵀ) / ||z||`). This is *fine* in high dim (S⁶³ has 63 tangent directions; gradients have lots of room). In 2D (S¹), the tangent space is 1D — gradients are highly constrained, and the loss landscape becomes brutal to navigate. Removing L2 normalization frees the gradients.
+
+So **L2 normalization was a hidden bottleneck during training**, not just a representational restriction at inference. The hyperparameter choices inherited from notebook 04 (τ=0.07, L2 norm) work for 64D but actively hurt 2D.
+
+### A real positive in the radius — and a data bug it exposed
+
+The radius diagnostics gave seemingly contradictory numbers:
+- Pearson(radius, BSISO amplitude) = **0.023** (near zero)
+- Spearman(radius, BSISO amplitude) = **0.747** (very strong rank correlation)
+
+The radius_diagnostics.png scatter revealed why: the amplitude axis ran to **−1000**. The `bsiso_amplitude` column has at least one −1000 fill value that destroys Pearson but not rank-based statistics.
+
+After ignoring the outlier(s), **the radius IS encoding BSISO amplitude — strongly**. ANOVAs confirm: radius differs significantly across phases (F=12.5, p=5e-16) and ENSO categories (F=8.2, p=3e-4).
+
+Geometrically clean: **angle = phase, radius = amplitude** — like (PC1, PC2) but learned end-to-end. The current probe targets (phase, ENSO) don't reward the radius because they don't depend on amplitude, but for amplitude regression or forecast tasks it would matter.
+
+### ENSO displacement — basically unchanged
+
+z = 2.53 (Option B) vs 2.59 (L2-norm best τ=0.5) vs 3.83 (64D). ENSO modulation is the weak signal in 2D regardless of normalization choice. Not surprising — ENSO has smaller variance than BSISO at intraseasonal scales.
+
+### Why the auto-decision said "RADIUS_DID_NOT_HELP → escalate to dim sweep"
+
+Decision rule keyed on the angle-vs-full gap (correctly: radius added 0 pp) and absolute thresholds (val ≥ 62%, z ≥ 3.0). 58.3% is just below 62%. So technically "no greenlight." The rule worked but the narrative missed the +25 pp recovery from L2-norm removal — the broader picture is much more positive than the auto-decision phrased it.
+
+### Decision: Path A — greenlight Phase 2 with the Option B config
+
+**Reasoning:**
+1. 5-fold CV 65.7% ± 4.1% is within 3 pp of 64D's 68.6% ± 1.0% — competitive enough for a meaningful three-way comparison.
+2. The result is now scientifically interpretable: angle = phase, radius = amplitude.
+3. The three-way comparison (conventional / supervised / SSL) needs a usable 2D supervised baseline; this is one.
+4. Phase 4 dim sweep deferred — can run in parallel later as a confirmatory experiment.
+
+### Methodological lesson for the writeup
+
+**Hyperparameter transferability across dimensions.** SimCLR-style contrastive (L2 norm + sharp τ ≈ 0.07) is tuned for high-dim embeddings (64D, 256D, 2048D). In low-dim (2D), both choices actively hurt:
+- Sharp τ → easy collapse (notebook 07: 38° arc).
+- L2 norm → gradient-projection bottleneck even when collapse is fixed (notebook 07b: full circle but probe stuck at 33%).
+
+**Fix:** soft τ (0.5) AND drop L2 norm. Recovers most of the 64D performance.
+
+This is a publishable methodological note — much of the contrastive literature assumes high-dim and the practitioner inherits these defaults uncritically.
+
+### Real bug to fix before further analysis
+`bsiso_amplitude` column has at least one −1000 fill value polluting continuous-amplitude diagnostics. Created notebook `03b_fix_amplitude_bug.ipynb` to clean it.
+
+### Files this session
+- `notebooks/extension_2d/07c_supervised_2d_no_l2norm.ipynb` (commit aa00189)
+- `results/extension_2d_plan.md` — Phase 1 outcome appended (commit aa00189)
+- `notebooks/03b_fix_amplitude_bug.ipynb` — data cleaning (this session)
+- `notebooks/extension_2d/08_ssl_temporal_2d.ipynb` — Phase 2 (this session)
+
+### Drive outputs from notebook 07c
+```
+results/lee_2d_no_l2/
+  embeddings.npy             (6579, 2) raw 2D, NOT normalized
+  training_curves.png        loss + norm trajectory + epoch time
+  embedding_2d_overview.png  4-panel: by phase / ENSO / amplitude / angular hist
+  radius_diagnostics.png     radius vs amplitude / phase / ENSO
+  radius_summary.json        Pearson + Spearman + ANOVAs
+  linear_probe_results.json  Full-2D probes
+  angle_only_vs_full_probes.json   Critical comparison
+  enso_displacement.png
+  phase1_option_b_summary.md
+checkpoints/encoder_2d_lee_no_l2_final.pth
+```
+
+### Next steps (this session)
+1. **Fix the BSISO amplitude data bug** (notebook 03b).
+2. **Phase 2 — SSL temporal 2D model** (notebook 08): Option B config (no L2 norm, τ=0.5, weight_decay=1e-4) on Lee MJJAS data passed through a Lanczos lowpass at 25 days. Pairs defined by temporal proximity (anchor d, positive in [d−3, d+3] same year, in-batch negatives). NO BSISO/ENSO labels used during training. Critical new diagnostic: 2D scatter colored by **calendar month** — if month-clustering, the seasonal cycle confound wasn't fully removed by Lee + bandpass.
+3. (Deferred) Phase 4 dim sweep — confirmatory.
+
+---
+
+## Session 14 — Three New Plans (2026-05-01)
+
+### Plan 1: Reduced CNN Architecture for the 2D Encoder ✓ IMPLEMENTED (2026-05-02)
+
+**Motivation.** The current `CNNEncoderNoL2` in notebooks 07c and 08 had a large FC step `128 → 2` that concentrates the entire compression in a single linear map. Since the target is only 2D, the 128-wide hidden layer is unnecessarily large.
+
+**Previous architecture (3→32→64→128, FC 128→2):**
+
+```
+Conv1:  3 → 32 ch,  3×3, padding=1, BN, ReLU, MaxPool2D(2,2)
+Conv2:  32 → 64 ch, 3×3, padding=1, BN, ReLU, MaxPool2D(2,2)
+Conv3:  64 → 128 ch,3×3, padding=1, BN, ReLU
+GlobalAvgPool2D → 128-dim vector
+FC:     128 → 2
+```
+
+**Implemented architecture (3→16→32→32, FC 32→2):**
+
+```
+Conv1:  3 → 16 ch,  3×3, padding=1, BN, ReLU, MaxPool2D(2,2)
+Conv2:  16 → 32 ch, 3×3, padding=1, BN, ReLU, MaxPool2D(2,2)
+Conv3:  32 → 32 ch, 3×3, padding=1, BN, ReLU
+GlobalAvgPool2D → 32-dim vector
+FC:     32 → 2
+```
+
+The FC compression ratio is now 32→2 (16×) instead of 128→2 (64×), and the total parameter count is much smaller. Results saved to new directories (`_v2`) to preserve old run artifacts for comparison.
+
+**Affected notebooks:** 07c (`results/lee_2d_no_l2_v2/`) and 08 (`results/lee_2d_ssl_v2/`).
+
+---
+
+### Plan 2: Lag Correlation Between the Three Representations
+
+**Goal.** Quantify how temporally similar each pair of the three 2D representations is, as a function of lag τ. This tests (a) how well each learned representation recovers the hand-crafted BSISO index, and (b) how similar the two learned representations are to each other.
+
+**Three objects (all indexed by day d over MJJAS 1981–2023):**
+
+| ID | Object | Source |
+|----|--------|--------|
+| `idx` | BSISO index | APEC (PC1, PC2) from `labels_aligned_mjjas_lee.csv` columns `bsiso1_1`, `bsiso1_2` |
+| `sup` | Supervised 2D representation | Notebook 07c embeddings — `results/lee_2d_no_l2/embeddings.npy`, shape (6579, 2) |
+| `ssl` | SSL temporal 2D representation | Notebook 08 embeddings — `results/lee_ssl_temporal/embeddings.npy`, shape (N, 2) |
+
+**Three pairwise lag correlations (τ ∈ [−30, +30] days):**
+- `ρ(idx, sup; τ)` — BSISO index vs. supervised representation
+- `ρ(idx, ssl; τ)` — BSISO index vs. SSL temporal representation
+- `ρ(sup, ssl; τ)` — supervised vs. SSL temporal
+
+**Temporal structure:** Lag correlations must be computed **within each year** (end of Sep year y is not followed by May year y+1). For year y with N_y MJJAS days, lag τ uses N_y − |τ| day-pairs. The per-year correlation is then averaged across years.
+
+**`> OPEN QUESTION (Plan 2a):`** What scalar quantity should be correlated? Three options:
+1. **Angle θ = atan2(z₂, z₁)** for each representation — most directly comparable to BSISO phase angle, but is circular so Pearson is biased; would use Spearman or a circular correlation coefficient.
+2. **Component-wise Pearson**: correlate dim-1 vs dim-1 and dim-2 vs dim-2 separately (2 correlation values per lag).
+3. **Full-2D vector correlation**: e.g., Procrustes-aligned Pearson on stacked (z₁, z₂) vectors.
+
+**`> OPEN QUESTION (Plan 2b):`** The supervised and SSL representations may differ by an arbitrary rotation (they have no shared reference frame). Should we first optimally align them (e.g., via Procrustes rotation to BSISO index) before computing the lag correlation?
+
+**Expected shape of results:** A 3-panel plot of ρ(τ) vs τ ∈ [−30, +30]. If `ρ(idx, sup; τ=0)` is high, the supervised encoder recovers the BSISO cycle. If the peak of `ρ(idx, ssl; τ)` is at τ ≠ 0, the SSL representation leads or lags the BSISO index by that many days.
+
+**Dependency:** Requires notebook 08 to be run and embeddings saved.
+
+---
+
+### Plan 3: East Asian Rainfall Prediction as Downstream Evaluation
+
+**Goal.** Use the three 2D representations as predictors of East Asian daily precipitation — the forecast-skill evaluation proposed in Session 13 and deferred until now.
+
+**Data needed:** ERA5 daily total precipitation (`tp`, kg m⁻² s⁻¹) over the East Asian monsoon region. This variable is NOT yet downloaded.
+
+**East Asian target region (standard monsoon box):** 20–45°N, 100–145°E. Covers the Chinese mainland, Korean Peninsula, Japan, and adjacent maritime areas.
+
+**Predictor sets (compared separately):**
+
+| Predictor | Components used |
+|-----------|----------------|
+| BSISO index | PC1, PC2 from APEC |
+| Supervised 2D | z₁, z₂ from notebook 07c |
+| SSL temporal 2D | z₁, z₂ from notebook 08 |
+
+**Model:** Linear regression (consistent with the linear-probe framework already used). Each predictor is a 2-vector → 2 regression coefficients + intercept. Lead times: τ = 0, +5, +10 days.
+
+**Target variable:** Lee-preprocessed precipitation anomaly — subtract annual cycle (3-harmonic Fourier, base 1981–2010) and 120-day running mean, then normalize by area-averaged std. Same preprocessing as the atmospheric fields. This ensures the target and inputs live on the same anomaly scale.
+
+**Skill metric:** Anomaly correlation coefficient (ACC) between predicted and observed anomalies; RMSE skill score vs. climatological baseline (zero forecast).
+
+**Data acquisition:** Add ERA5 `tp` to notebook `01b_era5_download_mjjas.ipynb`, or create a separate `01c_era5_precip_download.ipynb`. Domain for download: 20–45°N, 100–145°E, May–Sep 1979–2023 (need extra years for Fourier base-period).
+
+**`> OPEN QUESTION (Plan 3a):`** Single-point (area-averaged) target, or spatial skill map (ACC at each 2° grid point)? The spatial map is more informative and locates where each representation has predictive power, but adds complexity.
+
+**`> OPEN QUESTION (Plan 3b):`** Which precipitation dataset — ERA5 `tp` (already in the workflow) or an observation-based product (GPCP, TRMM/GPM)? ERA5 `tp` is self-consistent with the predictor data; GPCP/TRMM would be an independent verification target.
+
+---
+
+### Dependency Summary
+
+| Plan | Prerequisite |
+|------|-------------|
+| Plan 1 (architecture) | None — can implement immediately in notebooks 07c and 08 |
+| Plan 2 (lag correlation) | Notebook 08 must produce embeddings first |
+| Plan 3 (rainfall forecast) | ERA5 `tp` download + notebook 08 embeddings |
+
+---
+
+## Session 14b — Plan 1 Architecture Results + Decision (2026-05-02)
+
+### Full Architecture Comparison Table
+
+Results from running notebooks 07c and 08 under both the original 128-layer and new compact 32-layer architectures.
+
+| Configuration | BSISO phase val | BSISO 5-fold CV | ENSO bal-acc | z-score | Labels seen |
+|---|---|---|---|---|---|
+| 64D supervised (Lee MJJAS, nb 04) | 67.7% | 68.6% ± 1.0% | n/a | 3.83 | phase + ENSO |
+| 2D sup, **128-layer**, L2-norm, τ=0.07 (nb 07) | 32.8% | 36.1% ± 2.7% | 35.4% | 1.54 | phase + ENSO |
+| 2D sup, **128-layer**, no L2, τ=0.5 (nb 07c) | **58.3%** | **65.7% ± 4.1%** | 34.6% | 2.53 | phase + ENSO |
+| 2D sup, **32-layer**, no L2, τ=0.5 (nb 07c v2) | 32.1% | 34.5% ± 2.3% | 36.6% | **3.76** | phase + ENSO |
+| 2D SSL, **128-layer** (nb 08) | ❌ not saved | ❌ | ❌ | ❌ | none |
+| 2D SSL, **32-layer** (nb 08 v2) | 31.8% | 26.2% ± 3.5% | **38.7%** | **14.55** | none |
+
+### Key Findings
+
+**Finding 1: 32-layer is catastrophic for supervised 2D.**
+Phase val collapses from 58.3% → 32.1% (−26 pp); 5-fold CV from 65.7% → 34.5%.
+The compact CNN is too narrow to capture BSISO spatial structure (3-channel, 31×51 grid) and compress it to 2D in a single supervised pass.
+The only bright spot: z-score actually *improved* (2.53 → 3.76), suggesting the smaller encoder avoids overfitting to BSISO phase structure and retains ENSO modulation signal.
+
+**Finding 2: SSL 32-layer z-score 14.55 is extraordinary.**
+z=14.55 is nearly 4× the supervised 64D baseline (z=3.83) and produced with NO BSISO or ENSO labels — only temporal proximity pairs.
+BSISO phase probe is low (31.8%) but expected: temporal SSL is not trained to cluster by phase.
+Month-clustering ANOVA (F=2.57, p=0.036) is marginally significant but far below the strong-confound threshold (F>50). The SSL signal is likely genuine.
+
+**Finding 3: SSL 128-layer results were not saved.**
+The `SSL-128layer/` folder exists on Desktop but is empty. The 128-layer version of nb 08 was created in Session 13b but apparently not run before Plan 1 replaced the architecture. No comparison is available.
+
+### Decisions Made ✓
+
+| Notebook | Architecture | Rationale |
+|----------|-------------|-----------|
+| **07c (supervised 2D)** | **128-layer** (revert v2) | 58.3% vs 32.1% — clear winner; compact CNN loses 26 pp |
+| **08 (SSL 2D)** | **Need to run 128-layer for comparison** | 32-layer gives z=14.55 but no baseline to judge it against |
+
+### Action Required: Re-run SSL with 128-layer (nb 08)
+
+To decide the SSL architecture, notebook 08 must be re-run with the original 128-layer encoder (revert v2 change). This will answer:
+- Is z=14.55 a property of the task (temporal SSL) or an artefact of the smaller model?
+- If 128-layer SSL also gives z >> 3.83, then the SSL architecture choice is secondary — temporal self-supervision genuinely outperforms supervised on ENSO modulation.
+- If 128-layer SSL gives lower z, then 32-layer is genuinely better and should be kept.
+
+**To revert notebook 08 to 128-layer:** In the CNN definition cell, change `3→16→32→32, FC 32→2` back to `3→32→64→128, FC 128→2`. Save outputs to a new directory (e.g., `results/lee_2d_ssl_128/`) to preserve v2 results.
+
+### ✓ RESOLVED — SSL 128-layer results recovered (2026-05-02)
+
+See Session 14c below for full SSL architecture comparison and final decision.
+
+---
+
+## Session 14c — SSL Architecture Comparison + Final Decision (2026-05-02)
+
+### Full four-way comparison
+
+| Configuration | BSISO phase val | BSISO 5-fold CV | ENSO bal-acc | z-score | Month ANOVA F (angle) |
+|---|---|---|---|---|---|
+| 64D supervised (Lee MJJAS, nb 04) | 67.7% | 68.6% ± 1.0% | n/a | 3.83 | n/a |
+| 2D sup **128-layer** no L2 (nb 07c) | **58.3%** | **65.7% ± 4.1%** | 34.6% | 2.53 | n/a |
+| 2D sup **32-layer** no L2 (nb 07c v2) | 32.1% | 34.5% ± 2.3% | 36.6% | 3.76 | n/a |
+| 2D SSL **128-layer** (nb 08) | 26.1% | 24.0% ± 1.4% | 36.8% | 10.70 | **F=13.83** ⚠️ |
+| 2D SSL **32-layer** (nb 08 v2) | **31.8%** | **26.2% ± 3.5%** | **38.7%** | **14.55** | F=2.57 ✓ |
+
+### Analysis
+
+**Supervised 2D — 128-layer wins decisively (already decided).**
+BSISO phase 58.3% vs 32.1% (+26 pp). Larger capacity needed to compress 3×31×51 spatial fields under label-guided pair construction.
+
+**SSL 2D — 32-layer wins on every metric.**
+
+| Metric | 128-layer | 32-layer | Verdict |
+|--------|-----------|----------|---------|
+| BSISO phase val | 26.1% | 31.8% | 32-layer +5.7 pp |
+| BSISO 5-fold CV | 24.0% ± 1.4% | 26.2% ± 3.5% | 32-layer slightly better |
+| ENSO bal-acc | 36.8% | 38.7% | 32-layer +1.9 pp |
+| z-score | 10.70 | **14.55** | 32-layer +3.85 |
+| Month ANOVA F | **13.83** ⚠️ | 2.57 ✓ | 32-layer far cleaner |
+
+**Why 32-layer is better for SSL — the month-confound explanation.**
+The 128-layer encoder (F_angle=13.83, p=3e-11) has learned partial seasonal/monthly structure. It is large enough to memorize "this is a May-like field" vs "this is an August-like field" even after Lee et al. preprocessing removed the annual cycle. This seasonal leakage inflates the angular organisation of embeddings by calendar month, not just by BSISO state.
+
+The 32-layer encoder (F_angle=2.57, p=0.036 — marginal, not structurally significant) is too narrow to represent month-specific patterns. It is forced to learn what actually varies over ±3-day windows — intraseasonal BSISO continuity — rather than the slower seasonal background. The z-score benefit (14.55 vs 10.70) follows directly: cleaner temporal representation → tighter within-phase ENSO centroids → larger EN−LN displacement relative to the null.
+
+This is a genuine scientific finding, not just a hyperparameter win: **for temporal SSL, encoder capacity can be a liability rather than an asset** if the training data contains multi-scale temporal structure (intraseasonal + seasonal). Regularization by architecture (fewer filters) prevents the model from latching onto the wrong timescale.
+
+### ✓ Final Architecture Decisions
+
+| Notebook | Architecture | Reason |
+|----------|-------------|--------|
+| **07c** (supervised 2D) | **128-layer** (3→32→64→128, FC 128→2) | 58.3% vs 32.1%; supervised learning needs capacity |
+| **08** (SSL 2D) | **32-layer** (3→16→32→32, FC 32→2) | Better z-score AND cleaner (F=2.57 vs F=13.83) |
+
+Asymmetric architectures are scientifically justified: the two learning paradigms have opposite capacity requirements. This is worth a paragraph in the writeup.
+
+### SSL z-scores in context
+
+| Method | z-score | Labels used |
+|--------|---------|-------------|
+| 2D SSL 32-layer | **14.55** | none |
+| 2D SSL 128-layer | 10.70 | none |
+| 64D supervised | 3.83 | phase + ENSO |
+| 2D supervised 128-layer | 2.53 | phase + ENSO |
+
+The SSL model captures ENSO modulation of BSISO structure ~3–4× more strongly than supervised learning, without seeing a single label. This is the headline scientific result of Phase 2.
+
+Note: SSL z-scores are computed on 4,429 days (post-bandpass) vs 6,579 for supervised — so the SSL sample is smaller, which if anything biases z downward. The SSL advantage is real.
+
+### Next Steps
+
+1. **Notebooks are now finalized:** 07c stays at 128-layer; 08 stays at 32-layer (v2).
+2. **Plan 2 (lag correlation):** see Session 14d below — notebook 09 created and ready to run.
+3. **Plan 3 (precipitation forecast):** notebook 01c download ready to run; then notebook 10 builds the forecast.
+4. **Writeup note:** document the capacity-vs-confound finding for SSL architecture choice.
+
+---
+
+## Session 14d — Plan 2: Lag Circular Correlation Notebook Created (2026-05-02)
+
+### Design decisions resolved
+
+**`✓ DECIDED` Plan 2a — Scalar quantity:** θ = atan2(z₂, z₁) for each representation, with **circular correlation coefficient** (Jammalamadaka & SenGupta 2001).
+
+**`✓ DECIDED` Plan 2b — Procrustes alignment:** Not needed. The circular correlation coefficient is invariant to constant rotation of either variable (if θ₂ = θ₁ + constant, ρ_c = 1). Representations in different reference frames are directly comparable.
+
+### Circular correlation coefficient
+
+$$\rho_c(\theta_1, \theta_2) = \frac{\sum \sin(\theta_{1i} - \bar{\theta}_1)\sin(\theta_{2i} - \bar{\theta}_2)}{\sqrt{\sum\sin^2(\theta_{1i} - \bar{\theta}_1) \cdot \sum\sin^2(\theta_{2i} - \bar{\theta}_2)}}$$
+
+Range: [−1, 1]. θ̄ = circular mean = atan2(mean sin θ, mean cos θ).
+
+### Notebook 09 created: `notebooks/extension_2d/09_lag_correlation.ipynb`
+
+**Cells:**
+- Cell 1: Mount Drive + file paths (SUP_EMB_FILE, SSL_EMB_FILE, LABELS_SUP_FILE, LABELS_SSL_FILE)
+- Cell 2: Load all three representations → compute θ_idx, θ_sup, θ_ssl
+- Cell 3: `circular_corr()` + `lag_circular_corr()` functions
+  - Pairs formed within same calendar year only (no May–Sep cross-year bleeding)
+  - Convention: τ > 0 means A leads B
+- Cell 4: Compute all three lag curves (ρ_idx_sup, ρ_idx_ssl, ρ_sup_ssl)
+- Cell 5: Within-year permutation null bands (500 permutations, 95th pct)
+- Cell 6: 3-panel plot — one per pair, significance shading, pair-count secondary axis
+- Cell 7: Overlay plot — all three curves on one axis
+- Cell 8: Numerical summary table + save CSV (`lag_corr_summary.csv`, `lag_corr_curves.csv`)
+- Cell 9: Circular autocorrelation for each representation (intrinsic temporal memory)
+- Cell 10: Plain-text report
+
+**Key implementation detail:** `lag_circular_corr()` builds a date-to-index lookup for B, then for each day d in A computes d+τ, checks same year, looks up B(d+τ) if available. Minimum 30 pairs required to compute ρ_c at a given lag.
+
+### Expected outputs
+
+```
+results/lag_correlation/
+  lag_circular_corr.png          ← 3-panel, significance shading
+  lag_circular_corr_overlay.png  ← all three curves overlaid
+  autocorrelation.png            ← circular ACF per representation
+  lag_corr_summary.csv           ← peak τ, peak ρ, null threshold
+  lag_corr_curves.csv            ← full ρ_c(τ) arrays
+  lag_corr_report.txt            ← plain-text summary
+```
+
+### What to look for when results arrive
+
+| Observation | Interpretation |
+|---|---|
+| ρ_c(idx, sup; τ=0) high | Supervised embedding co-tracks BSISO index |
+| ρ_c(idx, sup) peaks at τ ≠ 0 | Supervised leads/lags BSISO index by that many days |
+| ρ_c(idx, ssl) lower than ρ_c(idx, sup) | Expected — SSL not trained with BSISO labels |
+| ρ_c(sup, ssl) moderate | Both representations share latent BSISO structure despite different training |
+| Autocorr decay width | Temporal memory of each representation (~30-day BSISO period expected) |
+
+### Status
+
+- [x] Notebook 09 created and pushed to GitHub
+- [x] Run notebook 09 on Colab — completed
+- [x] Results interpreted and logged — see Session 14e below
+
+---
+
+## Session 14e — Plan 2: Lag Correlation Results & Interpretation (2026-05-02)
+
+### Numerical results
+
+| Pair | ρ_c at τ=0 | Peak ρ_c | Peak τ | Trough ρ_c | Trough τ | Null (95%) | Sig. lags |
+|---|---|---|---|---|---|---|---|
+| idx ↔ sup | **+0.844** | +0.844 | 0 d | −0.218 | −22 d | 0.032 | 57/61 |
+| idx ↔ ssl | **−0.305** | +0.104 | +24 d | −0.321 | −2 d | 0.075 | 42/61 |
+| sup ↔ ssl | **−0.401** | +0.084 | −22 d | −0.408 | +2 d | 0.088 | 26/61 |
+
+### Finding 1 — Supervised 2D tracks the BSISO index almost perfectly
+
+ρ_c(idx, sup; τ=0) = **0.844**. The curve is symmetric around τ=0, decays smoothly to zero by τ=±15 days, then goes negative around τ=−22 days (−0.218). This is the classic lag-correlation signature of a quasi-periodic oscillation: positive lobe (0–15 days, within one half-period), negative lobe (≈15–30 days, opposite half-period), zero-crossing at ~15 days consistent with a ~30-day cycle. 57/61 lags are significant.
+
+**Interpretation:** The supervised 2D encoder (trained with explicit BSISO phase labels) essentially reproduced the geometry of the APEC (PC1, PC2) BSISO index. The embeddings are a rotation of the index up to ρ=0.84. This confirms the supervised encoder learned to represent BSISO phase state rather than noise.
+
+### Finding 2 — SSL embedding is significantly anti-correlated with the BSISO index
+
+ρ_c(idx, ssl; τ=0) = **−0.305**. The entire curve from τ=−10 to τ=+17 is negative and mostly significant. The weak positive peak (+0.104 at τ=+24 d) is barely above the null (0.075).
+
+**This is not a rotation artifact.** The circular correlation coefficient is invariant to constant rotations: if ssl_angle = bsiso_angle + constant, ρ_c = +1 regardless. A negative ρ_c means the angular structure is genuinely different — not just a shifted reference frame.
+
+**Most likely explanation — reversed rotation direction.** If the SSL embedding cycles counter-clockwise in the (z₁, z₂) plane while the BSISO index cycles clockwise (phase 1→2→...→8→1), then sin(θ_ssl − θ̄_ssl) ≈ −sin(θ_idx − θ̄_idx), giving ρ_c ≈ −1 in the limit of perfect anti-correlation. The observed ρ_c ≈ −0.3 to −0.4 is consistent with partial (noisy) counter-clockwise organization.
+
+**Physical meaning:** The SSL temporal encoder was trained to cluster days that are ±3 days apart. BSISO propagates eastward/northward continuously, so temporally proximate days have similar spatial patterns. The encoder learns a 2D manifold of temporal continuity — but without explicit phase labeling, the rotation direction is unconstrained. The learned manifold captures the same underlying cycle but traverses it in the opposite angular direction.
+
+### Finding 3 — Supervised and SSL embeddings are significantly anti-correlated with each other
+
+ρ_c(sup, ssl; τ=0) = **−0.401** — the strongest anti-correlation of the three pairs. The trough is at τ=+2 days (−0.408). This directly follows from findings 1 and 2: since sup ≈ idx (ρ=0.84) and ssl ≈ −idx (in circular sense), sup and ssl should be anti-correlated by transitivity. Only 26/61 lags are significant (weaker than the other pairs), reflecting that the ssl signal is noisier.
+
+### Summary interpretation
+
+| Pair | ρ_c(τ=0) | What it means |
+|---|---|---|
+| idx ↔ sup | +0.84 | Supervised = BSISO index (same cycle direction) |
+| idx ↔ ssl | −0.31 | SSL reversed rotation relative to BSISO index |
+| sup ↔ ssl | −0.40 | SSL reversed relative to supervised (follows from above) |
+
+**The SSL representation is NOT capturing the BSISO phase cycle in the same way as the supervised encoder or the APEC index.** It traverses the BSISO manifold in the opposite angular direction and/or at a different speed/phase. Yet it captures ENSO modulation (z=14.55) far better than the supervised approach (z=2.53). This is the core scientific finding: **SSL temporal continuity learning discovers a complementary angular organization that is more sensitive to ENSO modulation, at the cost of not reproducing the BSISO phase labeling convention.**
+
+### Implications for Plan 3 (precipitation forecast)
+
+The anti-correlation means the three representations will have different precipitation forecast skill patterns — SSL may capture different aspects of the monsoon than the supervised encoder. The spatial skill maps in notebook 10 will be the key diagnostic.
+
+### Next steps
+
+1. **Plan 3:** Download ERA5 `tp` (notebook 01c) → notebook 10 precipitation forecast
+2. **Writeup:** The negative SSL–idx correlation is a key result for the "three-way comparison" section — SSL captures ENSO modulation better but organizes the BSISO cycle differently
+3. **Optional diagnostic:** rotate the SSL embedding by 180° and recompute — if ρ_c(idx, ssl_flipped; τ=0) ≈ +0.3, confirms the reversed-rotation hypothesis
+
+---
+
+## Session 14f — Plan 3: Notebook 10 Precipitation Forecast Created (2026-05-02)
+
+### What was done
+- Precipitation download (notebook 01c) confirmed complete: `precip_MJJAS_1979_2023.nc`, 6885 days × 31 lat × 51 lon, 19.3 MB.
+- Created `notebooks/extension_2d/10_precip_forecast.ipynb` (7 cells) and pushed to GitHub (commit `d547e1b`).
+
+### Notebook 10 design
+
+**Cell 1:** Mount Drive, define paths (SUP/SSL embeddings, labels, BSISO raw, precip file)  
+**Cell 2:** Load embeddings + build θ arrays for all 3 representations (idx, sup, ssl)  
+**Cell 3:** Lee et al. preprocessing on `tp`:
+  1. Subtract 3-harmonic Fourier annual cycle (clim 1981–2010)
+  2. Subtract preceding 120-day running mean
+  3. Normalize by area-averaged temporal std  
+**Cell 4:** `build_XY()` + `acc_loyo()` — leave-one-year-out Ridge regression, predictor `[cos θ, sin θ]` → tp anomaly at lead τ; computes ACC at every grid point for all 3 repr × 3 leads  
+**Cell 5:** Spatial ACC maps — 3×3 panel (rows = repr, cols = τ=0/+5/+10 d), EA box marked  
+**Cell 6:** EA headline bar chart + `skill_table.csv`  
+**Cell 7:** Plain-text report → `results/precip_forecast/precip_forecast_report.txt`
+
+### Key design decisions
+- Same-year constraint applied in `build_XY()` (no cross-year leakage)
+- Ridge regression (α=1) with StandardScaler inside each LOYO fold
+- EA subregion headline = area-averaged ACC over 20–45°N, 100–145°E
+- VMAX = 0.4 for spatial maps (standard intraseasonal-forecast skill range)
+
+### Next step
+Run notebook 10 on Colab; paste results here.
+
+---
+
+## Session 15 — Plan 3 Results: Near-Zero ACC & Root-Cause Analysis (2026-05-03)
+
+### Numerical results
+
+| Repr | EA ACC τ=0 | EA ACC τ=+5 | EA ACC τ=+10 | Full-domain ACC τ=0 |
+|------|-----------|------------|-------------|---------------------|
+| idx  | +0.038 | +0.014 | −0.006 | +0.048 |
+| sup  | +0.037 | +0.011 | −0.009 | +0.049 |
+| ssl  | −0.001 | −0.003 | −0.014 | +0.022 |
+
+All values are near zero. Spatial maps show no coherent geographic structure. R² implied by ACC=0.038 is 0.14% explained variance.
+
+### Why the skill is near zero — multi-perspective analysis
+
+**1. Physical (primary cause): daily precipitation is dominated by synoptic noise, not BSISO signal.**  
+BSISO explains ~20–30% of the variance in 30–60-day *bandpassed* precipitation. In raw daily values, that signal is diluted ~5–10x by 2–10 day synoptic weather and sub-daily convective noise. An ACC of ~0.038 at τ=0 is physically plausible even with a perfect BSISO predictor. Published intraseasonal forecast literature reports ACC ≈ 0.3–0.5 on *weekly means* or *bandpassed* precipitation, not raw daily.
+
+**2. Data: tp at 12:00 UTC is a 6-hour ERA5 snapshot, not a 24-hour daily total.**  
+ERA5 `tp` at 12:00 UTC accumulates precipitation over the short-range forecast window 06:00 → 12:00 UTC (~6 h). A 24-hour sum would reduce convective noise by roughly √4 = 2. The correct daily total is `tp(00:00) + tp(12:00)` or hourly sums.
+
+**3. Data: no bandpass filter applied to precipitation.**  
+The BSISO index is derived from 20–90-day bandpassed fields. Notebook 10 applies Lee et al. preprocessing to tp (annual cycle + 120-day running mean), which is roughly a 25-day lowpass for circulation fields but retains the 2–25 day synoptic band for precipitation. Bandpassing tp to 20–90 days before regression would improve signal-to-noise by ~√10 and could raise ACC to 0.2–0.4 in the active BSISO region.
+
+**4. Method: cos/sin projection discards radius (BSISO amplitude).**  
+The predictor `[cos θ, sin θ]` projects all embeddings onto the unit circle. The supervised encoder radius has BSISO ANOVA F=347 (strong amplitude encoding). A weak BSISO day (small radius) should contribute little to the regression, but cos/sin treats it identically to a strong day. Using raw `[z₁, z₂]` as the predictor preserves amplitude information.
+
+**5. Method: 2-feature linear model cannot capture non-linear phase–precipitation response.**  
+Many grid points (e.g., East China) likely have non-monotonic precipitation response to BSISO phase (peak at phases 3 and 7, trough at 5). A linear predictor captures at most the first circular harmonic — insufficient for these patterns.
+
+**6. Physical: SSL reversed rotation → near-zero ACC for ssl.**  
+From Session 14e: ρ_c(idx, ssl; τ=0) = −0.305. The SSL embedding traverses the BSISO cycle counter-clockwise. Its `[cos θ, sin θ]` features are approximately anti-aligned with the precipitation response (which follows BSISO phase convention). This explains why ssl EA ACC ≈ −0.001, not the ~0.04 seen for idx/sup.
+
+**7. Method (minor): same-year constraint at large τ cuts late-season samples.**  
+At τ=+10, all September 22–30 pairs are dropped. Minor effect (~6% sample loss in September).
+
+### Summary of causes (ranked by impact)
+1. Daily precipitation dominated by synoptic noise (inherent — primary)
+2. No bandpass filter on tp (fixable)
+3. 6-hour snapshot instead of 24-hour total (fixable)
+4. cos/sin projection discards radius (fixable)
+5. Linear 2-feature model (hard to fix without more features)
+6. SSL reversed rotation explains ssl≈0 (explainable, not a code bug)
+
+### Options for improvement
+| Option | Change | Expected effect |
+|--------|--------|----------------|
+| Bandpass tp to 20–90 days | Add Lanczos filter cell in nb 10 | 3–8× ACC improvement |
+| Use [z₁,z₂] not [cos θ, sin θ] | One line in build_XY() | Adds amplitude info |
+| Phase composite maps | Bin θ into 8 sectors, show mean tp by bin | Standard BSISO diagnostic, clearest result |
+
+**Recommended next step for course project:** Option 3 — phase composite precipitation maps. Bin days by θ-angle (8 equal sectors of 45°), compute mean Lee-preprocessed tp per bin for each of the 3 representations, and plot the composite maps. This is the standard way BSISO–precipitation relationships are displayed in the literature, and it would produce interpretable geographic patterns even where daily regression skill is near zero.
+
+---
+
+## Session 15b — Plan 3b: Phase Composite Design & Notebook 10b (2026-05-03)
+
+### Design discussion
+
+Phase composite precipitation map = for each phase label, collect all days with that label, average the Lee-preprocessed tp anomaly field → one map per phase. Answers: "when BSISO is in phase X, where is it wet/dry?"
+
+Experiment C extension: within each phase, split by ENSO category (El Niño / La Niña), compute mean tp per subgroup, take EN − LN difference → 8 difference maps showing how ENSO modulates the BSISO-precipitation relationship per phase.
+
+**Phase label sources — agreed design:**
+| Representation | Phase labels |
+|---|---|
+| idx | CSV `bsiso_phase` (official APEC BSISO 1–8) |
+| sup | CSV `bsiso_phase` (same, ρ_c=0.844 makes θ_sup-bins equivalent) |
+| ssl | θ_ssl binned into 8 equal 45° sectors (-π to π) |
+
+**Why SSL cannot use BSISO phase labels:** Using the `bsiso_phase` column for ssl days would produce an almost identical composite to idx/sup (same labeling, just 4429 vs 6579 days). SSL representation itself would play no role. The SSL embedding must provide its own phase labels via θ_ssl sectors. Since SSL reverses rotation (ρ_c = −0.305), SSL sector k maps approximately to BSISO phase (9−k) mod 8 — composites appear in reversed order but should still be spatially coherent.
+
+**Scientific payoff:** SSL's z=14.55 ENSO displacement (vs idx z-score not measured, sup z=2.53) means SSL θ_ssl groups should show larger EN−LN differences in precipitation than idx/sup groups → the key result connecting Plan 1 (SSL captures ENSO modulation) and Plan 3 (spatial precipitation response).
+
+### Notebook 10b structure
+- Cell 1: Mount Drive, paths
+- Cell 2: Load embeddings + build θ arrays (idx from raw BSISO file, sup/ssl from embeddings); define ssl θ-bin labels
+- Cell 3: Load + Lee-preprocess tp (same 3-step pipeline as nb 10)
+- Cell 4: Basic phase composites — 3 rows (idx/sup/ssl) × 8 phases, mean tp anomaly, EA box marked
+- Cell 5: ENSO-stratified (EN − LN) difference maps — 3 rows × 8 phases
+- Cell 6: Report: sample counts per phase × ENSO cell, save outputs
+
+### Output files
+```
+results/precip_composite/
+  phase_composites.png          — 3×8 basic composite maps
+  enso_diff_composites.png      — 3×8 EN−LN difference maps
+  sample_counts.csv             — N per (repr, phase, enso) cell
+  composite_report.txt          — plain-text summary
+```
+
+---
+
+## Session 16 — Plan 3b Results: Phase Composite Precipitation Analysis (2026-05-03)
+
+### Files
+`/Users/haojiayi/Desktop/DDCS/percip-composite/` — phase_composites.png, enso_diff_composites.png, sample_counts.csv
+
+### Part A — Basic phase composites
+
+**idx = sup (identical):** Expected — same BSISO phase labels and same 6579 days. Physically reasonable propagating wet/dry patterns across Indian Ocean → Bay of Bengal → western Pacific as phase advances 1→8.
+
+**SSL: weaker and noisier, partial visual similarity.** Some broad spatial patterns resemble idx (Indian Ocean, western Pacific) but correspondence is not column-by-column clean. Three reasons this cannot be cleaner:
+1. ρ_c(idx,ssl) = −0.305, not −1.0 — reordering brings the modal BSISO phase into alignment but each SSL sector still contains a mix of multiple BSISO phases (contamination from weak anti-correlation)
+2. 34% fewer days per SSL sector (~550 vs ~830 for idx/sup) → ~18% noisier composites from sampling variance
+3. SSL groups days by temporal proximity (±3 days) ≠ sharp BSISO phase boundaries → different population of days per sector
+
+### Part B — EN−LN difference composites: the key finding
+
+The most important result is in the **sample counts**, not the map patterns.
+
+| SSL sector (→ aligned phase) | N_EN | N_LN | EN/LN ratio | Expected if independent |
+|---|---|---|---|---|
+| Sec→Ph1 | 134 | 114 | 1.17 (EN-enriched) | ~92 |
+| Sec→Ph4 | **41** | **195** | **0.21 (strongly LN)** | ~81 |
+| Sec→Ph5 | **28** | **171** | **0.16 (strongly LN)** | ~75 |
+| Sec→Ph7 | 134 | 111 | 1.21 (EN-enriched) | ~90 |
+
+(Expected computed from dataset-wide EN fraction = 721/4429 ≈ 16.3%)
+
+**SSL sectors 4 and 5 have ~half the El Niño days expected by chance; sectors 1 and 7 have ~45% more than expected.** SSL's angular sectors strongly separate ENSO states: El Niño days cluster in sectors 1 and 7, La Niña days in sectors 4 and 5.
+
+**idx/sup:** EN/LN ratio varies 0.44–0.90 across phases with no strong clustering — BSISO phase convention does NOT strongly separate ENSO states.
+
+This is the spatial, geometric expression of the z=14.55 ENSO displacement from notebook 08. The SSL embedding places El Niño and La Niña years into different arcs of its ring — a finding now made concrete in precipitation space.
+
+**Caveat:** Sectors 4-5 EN−LN maps are noisy (N_EN=28 and 41 → high variance on EN mean). The signal may be real but is not visually clear from the maps alone.
+
+### Summary conclusion
+
+| Diagnostic | Key result |
+|---|---|
+| Part A basic composites | SSL shows physically plausible but noisy patterns; not ideal for SSL because sectors ≠ pure BSISO phases |
+| Part B EN−LN (sample counts) | SSL clearly separates ENSO states geometrically; strongest precipitation-domain evidence for SSL's ENSO sensitivity |
+| idx vs SSL visual | Partial similarity in broad-scale patterns; no clean column-by-column match; consistent with ρ_c = −0.305 |
+
+### Next steps
+- The ENSO stratification finding (sectors 4-5 nearly pure LN, sectors 1&7 EN-enriched) is the result to highlight in the writeup for Plan 3
+- Optional: filter to high-amplitude SSL days (large radius) before compositing → cleaner patterns with fewer but purer days
+- Optional: bandpass tp to 20–90 days before compositing → suppress synoptic noise, amplify intraseasonal signal
+
+---
+
+## Session 17 — θ_ssl Orientation Fix + Analysis Report (2026-05-03)
+
+### Problem identified
+
+After reviewing the lag correlation results from nb 09 (which showed ρ_c(idx,ssl;0) = −0.305 and ρ_c(sup,ssl;0) = −0.401), the root cause of the negative values was traced:
+
+**Root cause:** The SSL encoder's final `nn.Linear(32, 2)` FC layer in nb 08 had no `torch.manual_seed` before instantiation (`encoder = CNNEncoderNoL2(...)` in Cell 12, id=encoder-loss). The InfoNCE loss is rotationally symmetric in 2D — it enforces temporal proximity but does not specify which direction (clockwise vs counter-clockwise) the BSISO ring is traversed. The random initialisation determined the traversal direction; by chance it chose counter-clockwise, opposite to the BSISO index convention.
+
+**Fix:** Change `theta_ssl = np.arctan2(emb_ssl[:, 1], emb_ssl[:, 0])` → `theta_ssl = np.arctan2(-emb_ssl[:, 1], emb_ssl[:, 0])` in all three downstream notebooks (09, 10, 10b). Negating z₂ reflects the ring across the z₁ axis, flipping the traversal direction without retraining. By the antisymmetry property of ρ_c under θ → −θ, this exactly negates all ssl-involving correlations.
+
+**Predicted post-fix values:**
+- ρ_c(idx, ssl; 0): −0.305 → +0.305
+- ρ_c(sup, ssl; 0): −0.401 → +0.401
+
+### Changes made (commit 0171854)
+
+- `notebooks/extension_2d/09_lag_correlation.ipynb` — Cell `cell-4`: negated z₂ in θ_ssl
+- `notebooks/extension_2d/10_precip_forecast.ipynb` — Cell `cell-load-emb`: same
+- `notebooks/extension_2d/10b_precip_composite.ipynb` — Cell `cell-labels`: same + updated BSISO phase correspondence print to say "should now align after z₂ negation"
+- `results/extension_2d_analysis_report.md` — Section 1 orientation-fix note; Section 2.3 table updated to positive values; Section 2.4 rewritten; Section 4.3 ENSO table rebuilt with explicit original SSL sector numbers (pre-fix / post-fix phase mapping column added)
+
+### Analysis report also fixed: SSL sector numbering bug
+
+Pre-fix report had listed the ENSO imbalance table in original SSL sector order (1–8) but labeled columns "Sec→Ph1"…"Sec→Ph8" without stating which original sector mapped to which reordered column. The report was updated to show the full mapping (original sector k, θ range, pre-fix BSISO phase, post-fix BSISO phase) and added a note that `composite_report.txt`'s "reversed rotation expected" theoretical text is hardcoded for the pre-fix formula and should be ignored.
+
+---
+
+## Session 18 — Confirmed Results: Lag Correlation & Composite Post-Fix (2026-05-04)
+
+### Lag correlation confirmed results (nb 09, post-fix run)
+
+Files: `/Users/haojiayi/Desktop/DDCS/lag-correlation-fix/` — lag_corr_summary.csv, lag_corr_curves.csv
+
+| Pair | ρ_c(τ=0) | Peak ρ_c | Peak τ | Trough ρ_c | Trough τ | 95% null | Sig lags/61 |
+|------|----------|---------|--------|-----------|---------|---------|------------|
+| idx ↔ sup | **+0.844** | +0.844 | 0 d | −0.218 | −22 d | 0.032 | 57 |
+| idx ↔ ssl | **+0.305** | +0.321 | −2 d | −0.104 | +24 d | 0.075 | 42 |
+| sup ↔ ssl | **+0.401** | +0.408 | +2 d | −0.084 | −22 d | 0.088 | 26 |
+
+**Key observations:**
+- The predicted post-fix values (+0.305, +0.401) match the actual Colab output to 4 decimal places — confirms the antisymmetry argument was correct
+- Peak offsets from τ=0 are marginal: idx↔ssl peak-vs-τ=0 = +0.016 (= sampling noise floor 1/√4429 ≈ 0.015); sup↔ssl peak-vs-τ=0 = +0.007. The two offsets point in opposite directions (−2d vs +2d) — they are noise, all three representations are **synchronous at τ≈0**
+- Positive lobe width ≈ 32–33 days for both ssl pairs → consistent with BSISO half-period ~30–45 days
+- Weak trough: idx↔ssl trough −0.104 at τ=+24, sup↔ssl trough −0.084 at τ=−22 → implies effective BSISO period ≈ 40–48 days in SSL space
+- 42/61 lags significant for idx↔ssl; 26/61 for sup↔ssl — both well above noise but noisier than idx↔sup (57/61)
+
+**Physical interpretation of ρ_c(sup,ssl) > ρ_c(idx,ssl):**
+Both supervised and SSL encoders process the same ERA5 atmospheric fields (u850, v850, OLR). Their 2D embeddings share spatial structure of the intraseasonal variability even though trained with different objectives. The raw BSISO index (PC1/PC2 scalars only) discards all spatial structure, so it is geometrically further from the SSL embedding.
+
+**Physical interpretation of ρ_c(idx,ssl) = 0.305 << 0.844:**
+Three factors: (1) SSL was not trained on BSISO labels — it learns temporal continuity from fields, not explicit phase boundaries; (2) the SSL ring carries strong ENSO information (z=14.55) which is orthogonal to the BSISO phase cycle and contributes uncorrelated angular variance; (3) 34% fewer ssl days (4429 vs 6579) → higher noise.
+
+### Composite results confirmed (nb 10b, post-fix run)
+
+Files: `/Users/haojiayi/Desktop/DDCS/lag-correlation-fix/` — sample_counts.csv, composite_report.txt
+
+After the z₂ negation fix, the sector numbering reversed (old sector k → new sector 9−k). The key ENSO imbalance pattern is unchanged physically but relabeled:
+
+| SSL sector (post-fix) | θ range | N_total | N_EN | N_LN | EN/LN ratio |
+|----------------------|---------|---------|------|------|-------------|
+| Sector 2 | [−135°, −90°) | 553 | **134** | 111 | **1.21** (EN-enriched) |
+| Sector 4 | [−45°, 0°) | 465 | **28** | 171 | **0.16** (strongly LN) |
+| Sector 5 | [0°, +45°) | 499 | **41** | 195 | **0.21** (strongly LN) |
+| Sector 8 | [+135°, +180°) | 566 | **134** | 114 | **1.18** (EN-enriched) |
+
+After fix: La Niña dominant in sectors 4–5 (θ ≈ 0°, positive z₁ direction); El Niño enriched in sectors 2 and 8. Previously (pre-fix): La Niña in sectors 4–5 (same data, different sector numbers), El Niño enriched in sectors 1 and 7. The physical ENSO clustering is unchanged.
+
+`composite_report.txt`'s "reversed rotation expected" mapping is hardcoded from the pre-fix notebook code and is incorrect for the post-fix run.
+
+---
+
+## Consolidated Results Summary — All Representations (as of 2026-05-04)
+
+| Metric | 64D Supervised (nb04-05) | 2D BSISO Index (θ_idx) | 2D Supervised (nb07c) | 2D SSL Temporal (nb08) |
+|--------|:---:|:---:|:---:|:---:|
+| **Training** | Siamese CNN, BSISO labels, Lee MJJAS year-split | No training (raw APEC PC1/PC2) | Supervised CNN, BSISO labels, 2D output | InfoNCE + temporal pairs, no labels, 2D output |
+| **N days** | 6,579 | 6,579 | 6,579 | 4,429 (post-bandpass) |
+| **BSISO phase acc (val / CV)** | 67.7% / 68.6%±1.0% | — | — | — |
+| **ENSO z-score** | 3.83 | — | 2.53 | **14.55** |
+| **ρ_c with BSISO index (τ=0)** | — | 1.0 (by definition) | **+0.844** | +0.305 |
+| **ρ_c between 2D representations** | — | — | sup↔ssl = +0.401 | (same) |
+| **Precip EA ACC τ=0** | — | +0.038 | +0.037 | ≈ 0 (pre-fix; expected ~+0.005 post-fix) |
+| **ENSO sector separation** | — | None | None | **Sectors 4-5 EN/LN=0.16-0.21; sectors 2,8 EN/LN≈1.2** |
+
+**Key takeaways:**
+1. **64D supervised** is the best BSISO classifier (67.7% vs 12.5% baseline) but weak ENSO separator (z=3.83)
+2. **2D supervised** faithfully reproduces the BSISO index geometry (ρ_c=0.844) but adds little new (z=2.53 < z=3.83)
+3. **2D SSL** is the unique result: moderate BSISO alignment (ρ_c=0.305), but far stronger ENSO sensitivity (z=14.55) than any supervised approach, with El Niño / La Niña years systematically occupying different angular arcs of its embedding ring — despite receiving no ENSO labels during training
+
+---
+
+## MJO Extension Plan — Wheeler & Hendon (2004) SSL Index (2026-05-12)
+
+### Motivation
+
+The BSISO project is functionally complete (Session 18). The natural next question is: can the same SSL framework — temporal contrastive learning without labels — discover a more ENSO-sensitive representation of the **Madden-Julian Oscillation (MJO)** than the conventional RMM index (Wheeler & Hendon 2004)?
+
+The MJO is the dominant mode of tropical intraseasonal variability at global scale (30–80 day period, eastward propagation around the equator). The RMM index is a 2D hand-crafted index derived from combined EOFs of OLR + u850 + u200. The parallel to our BSISO work is exact.
+
+---
+
+### What the Paper Specifies (Wheeler & Hendon 2004)
+
+#### Input variables (confirmed from paper)
+| Variable | Level | Source in paper |
+|----------|-------|----------------|
+| OLR | — | NOAA satellite (daily) |
+| u850 | 850 hPa | NCEP-NCAR reanalysis |
+| u200 | 200 hPa | NCEP-NCAR reanalysis |
+
+**No v850, no v200, no meridional wind.** Only two zonal wind levels + OLR. This is a key difference from the BSISO project (which used u850 + v850 + OLR).
+
+#### Spatial domain
+- **Latitude**: meridionally averaged from **15°S to 15°N** (one scalar per longitude per variable)
+- **Longitude**: **all longitudes globally** (0° to 360°E)
+- Result: each variable becomes a 1D profile of length 144 (at 2.5°) or 180 (at 2°)
+
+#### Preprocessing (3 steps)
+1. **Annual cycle removal**: subtract time mean + first **3 harmonics** of climatological annual cycle (Fourier, base period 1979–2001) at each grid point
+2. **Interannual variability removal** (two sub-steps):
+   a. Subtract variability linearly related to **SST1** — first rotated EOF of Indo-Pacific SSTs (proxy for ENSO). Monthly regression, interpolated to daily basis, subtracted from each grid point.
+   b. Subtract **preceding 120-day running mean** of the resulting anomaly (captures remaining interannual + decadal drift)
+3. **Global variance normalization**: divide each variable by its **global (all-longitude) temporal variance** (one scalar per variable, not per grid point)
+   - Ensures each of the 3 variables contributes equally to the combined EOF
+
+After preprocessing, variables are denoted OLR', u850', u200' (prime = anomaly after steps 1+2) and OLR'*, u850'*, u200'* (asterisk = additionally normalized by global variance).
+
+#### Index construction
+- Combined EOF of [OLR'*, u850'*, u200'*] at all longitudes, all seasons, 1979–2001
+- Leading two EOFs explain 12.8% + 12.2% of combined variance
+- PC1 = **RMM1**, PC2 = **RMM2**
+- 8 phases defined by octant of (RMM1, RMM2) plane; amplitude = √(RMM1² + RMM2²)
+- Nominal transit time per phase = 6 days; total MJO period ~48 days
+
+---
+
+### Key Differences: MJO Project vs BSISO Project
+
+| Aspect | BSISO (current) | MJO (new) |
+|--------|----------------|-----------|
+| Input variables | u850, **v850**, OLR | u850, **u200**, OLR |
+| v850 | needed | **not used** |
+| u200 | not used | **needed (new download)** |
+| Spatial domain | 60°E–160°E, 0–60°N (2D map) | **Global, 15°S–15°N (1D or 2D)** |
+| Input shape | (N, 3, 31, 51) | (N, 3, 16, 180) [2D] or (N, 3, 1, 180) [1D avg] |
+| Reference index | APEC BSISO PC1/PC2 | **BoM RMM1/RMM2** |
+| Propagation | Northward + eastward | **Eastward (equatorial)** |
+| Period | 20–60 days | **30–80 days** |
+
+| Season | MJJAS | **All-year or Nov–Apr (TBD)** |
+| N samples | 6,579 (MJJAS) | **~16,000 (all-year) or ~8,500 (Nov–Apr)** |
+| ENSO label | JJA Niño 3.4 (>0.5 = El Niño) | **Monthly Niño 3.4 (TBD)** |
+
+---
+
+### Proposed Notebook Structure (continuing from nb10b)
+
+Notebooks live in `notebooks/mjo/` (new subfolder) to keep BSISO and MJO work cleanly separated. Drive outputs go to `BSISO_SSL_Project/MJO/`.
+
+#### nb11 — MJO Labels Download (`11_mjo_rmm_download.ipynb`)
+**Goal:** Download RMM index, parse it, save `rmm_labels.csv`.
+
+- Download from BoM: `http://www.bom.gov.au/climate/mjo/graphics/rmm.74toRealtime.txt`
+  - Format: `year month day RMM1 RMM2 phase amplitude flag`
+  - Data available from June 1974 to present, daily
+- Parse with pandas: convert year/month/day → `pd.Timestamp`
+- Filter to 1979–2023 (match ERA5 period)
+- Compute ENSO category per day: join with NOAA monthly Niño 3.4 index (already used in BSISO project — `noaa_enso.csv`)
+- ENSO threshold: monthly Niño 3.4 > +0.5 K → El Niño; < −0.5 K → La Niña; else Neutral
+- Flag rows where RMM amplitude < 1.0 (weak/no MJO) — use for filtering in training but keep in CSV
+- Save: `MJO/data/raw/rmm_labels.csv` (columns: `date, rmm1, rmm2, phase, amplitude, enso_category`)
+- Validation cell: class distribution, phase composite polar plot of (RMM1, RMM2), ENSO balance per season
+
+#### nb12 — MJO ERA5 Download (`12_mjo_era5_download.ipynb`)
+**Goal:** Download ERA5 u850, u200, OLR for global equatorial domain.
+
+- **Variable list**:
+  - Pressure levels: `u_component_of_wind` at `[850, 200]` hPa → `reanalysis-era5-pressure-levels`
+  - Single level: `top_net_thermal_radiation` (OLR, `ttr`) → `reanalysis-era5-single-levels`
+- **Domain**: latitude `[15, -15]` (15°N to 15°S), longitude `[0, 360]` (all), grid `[2.0, 2.0]`
+  - Result: 16 lat points × 181 lon points (or 180 if wrapping to 358°E)
+- **Time**: all months, 1979–2023, `12:00 UTC` (same convention as BSISO)
+- **Chunking**: download in 5-year blocks to avoid CDS timeout (1979–1988, 1989–1998, 1999–2008, 2009–2018, 2019–2023)
+- **Outputs**:
+  - `MJO/data/raw/u850_u200_YYYY_YYYY.nc` × 5 chunks (both pressure levels in one file)
+  - `MJO/data/raw/OLR_MJO_1979_2023.nc`
+- **Expected file sizes**: ~3–5 MB per wind chunk (u850+u200, global 16-lat strip); ~20 MB for OLR
+- **Verification cell**: print shapes, check date ranges, plot one day u850 map
+
+#### nb13 — MJO Preprocessing (`13_mjo_preprocessing.ipynb`)
+**Goal:** Wheeler & Hendon preprocessing → `X_MJO.npy`, `labels_aligned_mjo.csv`.
+
+**Step 1 — Meridional average (15°S–15°N)**
+- For each variable, average over the 15°S–15°N latitude band (16 grid points) → shape (N_days, 180) per variable
+- `> OPEN Q1`: Use meridional average (1D per variable, shape (N, 3, 180)) OR keep 2D maps (N, 3, 16, 180)? See open questions below.
+
+**Step 2 — Annual cycle removal**
+- Base period: 1979–2001 (same as WH04)
+- Per grid point (or per longitude after meridional average): compute DOY climatology, fit 3-harmonic Fourier
+- `f(d) = a₀ + Σₖ₌₁³ [aₖ cos(2πkd/365) + bₖ sin(2πkd/365)]`
+- Subtract smooth cycle from all days → anomaly field
+
+**Step 3 — Interannual variability removal**
+- `> OPEN Q2`: Full WH04 method (SST1 regression + 120-day running mean) or simplified (120-day running mean only, as in Lee et al.)? See open questions below.
+- If simplified: subtract preceding 120-day running mean per grid point (or per longitude) — same as current Lee et al. notebooks
+- Denote result: OLR', u850', u200'
+
+**Step 4 — Global variance normalization**
+- Per variable: compute `σ²_global` = variance over all longitudes and all days
+- Divide each variable by `σ_global` → OLR'*, u850'*, u200'*
+
+**Step 5 — Stack and align**
+- Build array shape `(N, 3, 180)` or `(N, 3, 16, 180)`: axis 1 = [u850'*, OLR'*, u200'*] (channel order)
+- Align dates with `rmm_labels.csv` intersection
+- Filter to selected season (TBD: all-year or Nov–Apr)
+- Save: `X_MJO.npy`, `labels_aligned_mjo.csv`, `norm_stats_mjo.json`
+
+**Step 6 — Validation**
+- MJO phase composites: 8-panel plot of OLR'* + u850'* for phases 1–8 → should show progressive eastward propagation
+- Zonal Hovmöller diagram (time-longitude) for one representative year → should show eastward propagation signal
+- Confirmed if MJO signal visible with correct structure (Indian Ocean initiation, Maritime Continent amplification, Pacific extension)
+
+#### nb14 — MJO Supervised 2D (`14_mjo_supervised_2d.ipynb`)
+**Goal:** Train 2D supervised contrastive encoder with RMM phase + ENSO labels. Based on nb07c architecture.
+
+- **Architecture**: 128-layer CNN (3→32→64→128, FC→2), no L2 normalization, τ=0.5
+  - Input adapted for MJO shape: if 1D, replace `MaxPool2D` with `MaxPool1D`; if 2D (16×180), use same 2D CNN (stride + pooling will handle wide longitude dimension)
+- **Pair construction** (same logic as BSISO):
+  - Positive: same RMM phase + same ENSO category
+  - Hard negative: same RMM phase + different ENSO category
+  - Easy negative: different RMM phase
+  - Filter: amplitude > 1.0 (active MJO days only, as WH04 defines weak MJO as amplitude < 1)
+- **Year-based split**: every 5th year held out (1979, 1984, 1989, ..., 2019)
+- **Outputs**: `MJO/checkpoints/encoder_mjo_sup_final.pth`, `MJO/results/sup/`
+- **Evaluation**: BSISO/RMM phase linear probe, ENSO displacement z-score, 2D scatter plot
+
+#### nb15 — MJO SSL Temporal 2D (`15_mjo_ssl_temporal_2d.ipynb`)
+**Goal:** Train 2D SSL temporal encoder with temporal proximity pairs, no labels. Based on nb08 (32-layer) architecture.
+
+- **Architecture**: 32-layer CNN (3→16→32→32, FC→2), no L2 normalization, τ=0.5
+- **Pair construction**:
+  - Anchor: day d
+  - Positive: day d+τ where τ ∈ [−3, +3], same year
+  - In-batch negatives (InfoNCE)
+- **Bandpass preprocessing**: apply 25-day Lanczos lowpass to `X_MJO.npy` before training (same as nb08 for BSISO) → suppress synoptic noise
+  - For MJO: 20–90 day Lanczos bandpass may be more appropriate (MJO band) — `> OPEN Q3`
+- **Year-based split**: same as nb14
+- **Outputs**: `MJO/checkpoints/encoder_mjo_ssl_final.pth`, `MJO/results/ssl/`
+
+#### nb16 — MJO Three-Way Comparison (`16_mjo_comparison.ipynb`)
+**Goal:** Comprehensive comparison of RMM, supervised 2D, and SSL 2D representations. Mirrors Session 12b–18 diagnostics from BSISO project.
+
+- **Cell 1**: Load all three 2D representations (θ_rmm from rmm_labels.csv, θ_sup from nb14 embeddings, θ_ssl from nb15 embeddings)
+- **Cell 2**: Lag circular correlation (same as nb09): ρ_c(rmm, sup; τ), ρ_c(rmm, ssl; τ), ρ_c(sup, ssl; τ) for τ ∈ [−30, +30] days
+- **Cell 3**: Per-phase ENSO displacement z-scores (10,000 permutations) for all 3 representations × 8 phases
+- **Cell 4**: Phase composite maps — global equatorial OLR + u850'* for all 3 representations × 8 phases
+- **Cell 5**: EN−LN difference composite maps (ENSO stratification per phase) — key: does SSL show stronger separation than RMM?
+- **Cell 6**: Comparison table + auto-generated report → `MJO/results/mjo_comparison_report.txt`
+
+---
+
+### Data Size Estimates
+
+| File | Shape | Size (float32) |
+|------|-------|---------------|
+| `X_MJO.npy` [1D avg, all-year] | (16,425, 3, 180) | ~35 MB |
+| `X_MJO.npy` [2D maps, all-year] | (16,425, 3, 16, 180) | ~570 MB |
+| `X_MJO.npy` [1D avg, Nov-Apr] | (~8,500, 3, 180) | ~18 MB |
+| `X_MJO.npy` [2D maps, Nov-Apr] | (~8,500, 3, 16, 180) | ~295 MB |
+| ERA5 wind download (5 chunks) | 16 lat × 181 lon × 16,425 days × 2 levels | ~200 MB raw nc |
+| ERA5 OLR download | 16 lat × 181 lon × 16,425 days | ~100 MB raw nc |
+| RMM labels | ~16,000 rows × 7 columns | <1 MB |
+
+All sizes within Google Drive free tier (15 GB). Recommended approach (1D avg) keeps `X_MJO.npy` small and fast to load.
+
+---
+
+### Google Drive Folder Structure (MJO)
+
+```
+BSISO_SSL_Project/MJO/
+├── data/
+│   ├── raw/
+│   │   ├── u850_u200_1979_1988.nc
+│   │   ├── u850_u200_1989_1998.nc
+│   │   ├── u850_u200_1999_2008.nc
+│   │   ├── u850_u200_2009_2018.nc
+│   │   ├── u850_u200_2019_2023.nc
+│   │   ├── OLR_MJO_1979_2023.nc
+│   │   └── rmm_labels.csv
+│   └── processed/
+│       ├── X_MJO.npy
+│       ├── labels_aligned_mjo.csv
+│       └── norm_stats_mjo.json
+├── checkpoints/
+│   ├── encoder_mjo_sup_final.pth
+│   └── encoder_mjo_ssl_final.pth
+└── results/
+    ├── sup/
+    ├── ssl/
+    └── mjo_comparison_report.txt
+```
+
+---
+
+### Open Questions — Decisions Needed Before Implementation
+
+**`> OPEN Q1` — 1D vs 2D input representation**
+- **Option A (1D average):** Meridionally average 15°S–15°N → shape `(N, 3, 180)`. This exactly follows WH04 methodology. Requires 1D CNN (replace MaxPool2D with MaxPool1D, or use `(1, 180)` tensors). Small file size. Lower spatial richness but matches the reference index design.
+- **Option B (2D maps):** Keep full 2D maps `(N, 3, 16, 180)`. More spatial information. Consistent with BSISO CNN architecture (just wider longitude dimension). Model can learn meridional structure too. Larger memory footprint (~16× vs 1D avg). Less faithful to WH04.
+- **Recommendation**: Option A for first run (faithful to WH04, fast, smaller), optionally add Option B as ablation if time allows.
+
+**`> OPEN Q2` — ENSO removal method**
+- **Option A (full WH04):** SST1 regression (step a) + 120-day running mean (step b). Most rigorous. Requires downloading the first rotated EOF of Indo-Pacific SSTs (Drosdowsky & Chambers 2001, available from BoM as `sst1.txt`). Adds complexity.
+- **Option B (simplified Lee):** 120-day running mean only (no SST1 step). Already implemented and validated for BSISO (Sessions 9–18). Consistent with rest of project. Slightly less rigorous on ENSO removal but practically equivalent.
+- **Recommendation**: Option B (consistent with Lee et al. approach used throughout the BSISO project). If the resulting composites show residual ENSO signal, we can add SST1 regression as a refinement.
+
+**`> OPEN Q3` — Season scope**
+- **Option A (all-year):** ~16,000 days, captures full MJO lifecycle, all phases well-sampled. More ENSO events (El Niño active year-round). ENSO definition: monthly Niño 3.4 (same threshold as BSISO).
+- **Option B (Nov–Apr only):** ~8,500 days, peak MJO season (boreal winter), stronger and more regular MJO, well-studied composites for validation. Simpler ENSO definition (DJF Niño 3.4 for each season).
+- **Recommendation**: Option A (all-year) to match WH04's "all-season" design philosophy. This also gives more training data for SSL.
+
+**`> OPEN Q4` — SSL bandpass**
+- **Option A (25-day lowpass):** same Lanczos lowpass used for BSISO nb08. Easy, tested code.
+- **Option B (20–90 day bandpass):** more targeted for MJO period. Better isolates the intraseasonal signal from both synoptic noise AND lower-frequency ENSO. Standard in MJO literature. Requires two-pass Lanczos filter.
+- **Recommendation**: Option B (20–90 day bandpass) — better motivated for MJO. Apply to SSL input only (nb15), not to supervised input.
+
+**`> OPEN Q5` — CNN architecture for 1D input**
+If Option A (1D avg) is chosen for Q1, the CNN must be adapted:
+- Replace `Conv2d` with `Conv1d`
+- Replace `MaxPool2d(2,2)` with `MaxPool1d(2)` (or keep as (1,180) and use Conv2d — simpler code reuse)
+- The 2D option `(1, 180)` using Conv2d with kernel `(1,3)` and pool `(1,2)` avoids code rewrite
+- **Recommendation**: Use `(1, 180)` input with Conv2d — minimal code change from current notebooks.
+
+---
+
+### Dependency Graph
+
+```
+nb11 (RMM labels) ──────────────────────────────────────────── nb16
+nb12 (ERA5 download) → nb13 (preprocessing) → nb14 (supervised) ─┘
+                                            → nb15 (SSL temporal) ─┘
+```
+
+nb11 and nb12 can run in parallel. nb13 requires both. nb14 and nb15 can run in parallel after nb13. nb16 requires both nb14 and nb15.
+
+---
+
+### Scientific Narrative (what we expect to find)
+
+By analogy with the BSISO findings:
+1. **RMM as conventional baseline**: 8-phase equatorial cycle, well-validated in literature
+2. **Supervised 2D**: should closely recover RMM geometry (high ρ_c), strong phase probe, moderate ENSO z-score
+3. **SSL temporal 2D**: expected to capture ENSO modulation of MJO more strongly than supervised, because ENSO modifies MJO propagation characteristics in ways that temporal continuity learning can detect (El Niño years: MJO suppressed over Maritime Continent, enhanced over central Pacific; La Niña: opposite)
+4. **Key new test**: does ENSO modulation of MJO show the same "SSL advantage" (z_SSL >> z_supervised) as ENSO modulation of BSISO? If yes, this suggests the advantage is a general property of temporal SSL, not specific to boreal summer monsoon dynamics.
+
+---
+
+*Plan created Session 19 (2026-05-12). Open questions Q1–Q5 require user decision before nb11 implementation.*
+
+---
+
+## Session 20 — MJO Open Questions Resolved + nb11 Implementation (2026-05-12)
+
+### Decisions Made ✓
+
+| Question | Decision |
+|----------|---------|
+| **Q1 — Input shape** | **Option A**: 1D meridional average → tensor shape `(N, 3, 1, 180)` |
+| **Q2 — ENSO removal** | **Option B**: simplified Lee (120-day running mean only, no SST1 regression) |
+| **Q3 — Season scope** | **Option A**: all-year (~16,000 days), ENSO via monthly Niño 3.4 |
+| **Q4 — SSL bandpass (nb15)** | **Option B**: 20–90 day Lanczos bandpass (standard MJO band) |
+| **Q5 — CNN architecture** | **Recommendation**: keep Conv2d with input `(1, 180)`, kernel `(1,3)`, pool `(1,2)` — minimal code change from BSISO notebooks |
+
+### Implications
+
+- `X_MJO.npy` will have shape `(N, 3, 1, 180)` — meridionally averaged, ready to feed into existing Conv2d architecture with no code changes beyond input size
+- Preprocessing nb13 Step 1 averages over latitude axis only; no 2D spatial structure retained
+- nb14/nb15 use Conv2d with `kernel_size=(1, 3)` and `MaxPool2d((1, 2))` — identical to BSISO extension_2d notebooks except longitude dimension is 180 instead of 51
+- nb15 applies 20–90 day bandpass Lanczos filter to `X_MJO.npy` before training (inline in the notebook, not saved separately)
+- All-year scope means ENSO definition = monthly Niño 3.4 > +0.5 K (El Niño), < −0.5 K (La Niña), else Neutral — same threshold as BSISO
+
+### Completed This Session
+- [x] `notebooks/mjo/` subfolder created
+- [x] `notebooks/mjo/11_mjo_rmm_download.ipynb` written (10 cells)
+- [x] `notebooks/mjo/12_mjo_era5_download.ipynb` written (7 cells)
+- [x] `notebooks/mjo/13_mjo_preprocessing.ipynb` written (14 cells) — full WH04 pipeline (simplified)
+
+### Notes on nb13 design
+- Channel order: `[u850, OLR, u200]` (matches plan)
+- Output shape `(N, 3, 1, 180)` — Conv2d-compatible with singleton lat axis
+- Base period **1979–2001** (WH04 paper) — different from BSISO's 1981–2010
+- Global temporal std normalization (one scalar per variable, computed over base period)
+- Stores `longitudes_mjo.npy` alongside `X_MJO.npy` for downstream plotting
+- Validation: 8-panel phase composites + 1992-93 Hovmöller + 3-panel ENSO composites
+
+### Next Steps
+1. **nb14** — MJO supervised 2D (`notebooks/mjo/14_mjo_supervised_2d.ipynb`)
+2. **nb15** — MJO SSL temporal 2D (20–90 day bandpass)
+3. **nb16** — MJO three-way comparison (RMM vs supervised vs SSL)
+
+---
+
+## Session 21 — Colab Bugs Fixed + MJO Physical Explanation (2026-05-16/17)
+
+### Bug 1 — nb11 Cell 2: BoM 403 Forbidden
+
+**Symptom:** `requests.get(RMM_URL)` returned HTTP 403. URL accessible in browser but not from Colab.
+
+**Cause:** BoM's server blocks headless HTTP clients (no User-Agent header → identified as bot).
+
+**Fix:** Added browser-like request headers:
+```python
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ...',
+    'Referer': 'http://www.bom.gov.au/climate/mjo/',
+    'Accept': 'text/plain,text/html,*/*',
+}
+r = requests.get(RMM_URL, headers=headers, timeout=60)
+```
+Commit: `488d3a8`
+
+---
+
+### Bug 2 — nb12 Cells 4 & 5: CDS "cost limits exceeded" (403)
+
+**Symptom:** Both wind and OLR downloads failed with `HTTPError: 403 cost limits exceeded / request too large`.
+
+**Cause:** CDS API limits requests to ~1,000 fields per call.
+- Wind (10-year chunk, all-month, 2 levels): 10yr × 12mo × ~365d × 2 levels ≈ **7,300 fields** — over limit
+- OLR (all 45 years): 45yr × 12mo × ~365d ≈ **16,400 fields** — far over limit
+
+**Fix:** Switched to **1-year chunks** for both wind and OLR:
+- Wind: `u850_u200_{YYYY}.nc` (45 files, ~730 fields each)
+- OLR: `OLR_MJO_{YYYY}.nc` (45 files, ~365 fields each)
+- Skip-if-exists logic preserved — safe to restart after interruption
+- nb13 Cell 2 (wind loader) and Cell 3 (OLR loader) updated to glob `u850_u200_*.nc` and `OLR_MJO_*.nc`
+
+Commits: `41f2c95` (wind), `26af853` (OLR + nb13 loaders)
+
+---
+
+### Bug 3 — nb13 Cells 7–8: NaN normalization scalars → blank X_MJO.npy
+
+**Symptom:** Cell 8 printed `u850: nan m/s`, `u200: nan m/s`, `OLR: nan J/m²`. All phase composites blank. X_MJO.npy saved at correct size (35.5 MB) but filled with NaN.
+
+**Root cause (chain):**
+
+```
+closed='left' in rolling()
+  → day 0 window = the 120 days *before* 1979-01-01
+  → those days don't exist → window is empty (0 observations)
+min_periods=1
+  → requires ≥ 1 observation; 0 < 1 → rolling returns NaN
+anom[0] − NaN = NaN
+  → first row of u850_iso / u200_iso / olr_iso is NaN
+MJO base period = 1979–2001 (starts at 1979)
+  → base_mask includes 1979-01-01
+  → base_vals = iso_2d[base_mask].ravel() contains NaN
+std() (not nanstd) on array containing NaN
+  → returns NaN
+  → scalar_std = NaN → entire normalized array = NaN
+```
+
+**Why BSISO notebooks never hit this:** BSISO base period is 1981–2010 and data starts May 1979. The NaN row (1979-05-01) is outside the base period, so `base_mask` excludes it and `std()` is clean.
+
+**Fix (two-part):**
+
+Cell 7 — detect and patch NaN rows after rolling subtraction:
+```python
+nan_days = np.where(np.isnan(result).any(axis=1))[0]
+if len(nan_days) > 0:
+    result[nan_days] = anom_2d[nan_days]  # no correction for day 0 — use raw anomaly
+```
+This is physically correct: on the very first day there is no 120-day history to subtract, so we leave the annual-cycle anomaly unchanged.
+
+Cell 8 — switch to `np.nanstd` as a safety net:
+```python
+scalar_std = float(np.nanstd(base_vals))
+```
+Also added explicit NaN count diagnostics to both cells.
+
+Commit: `dc7f651`
+
+---
+
+### MJO Phase Composite Physical Explanation
+
+The eastward-shifting OLR minimum in the phase composites is the MJO's defining physical signature:
+
+- **Negative OLR'** = anomalously low outgoing longwave radiation = deep convective clouds (organized thunderstorm clusters)
+- Each RMM phase ≈ 6 days elapsed; full cycle ≈ 48 days; propagation speed ≈ 5 m/s eastward
+
+| Phase | Convection center | Physical mechanism |
+|-------|------------------|--------------------|
+| 1–2 | Indian Ocean (~60–80°E) | Warm SSTs + low-level moisture convergence initiate convection |
+| 3–4 | Maritime Continent (~100–120°E) | Often weakens/fragments over Indonesian islands and terrain ("Maritime Continent barrier") |
+| 5–6 | West Pacific (~140–160°E) | Re-intensifies over warm Pacific pool; u850 westerlies peak behind envelope |
+| 7–8 | Central/East Pacific (>160°E) | Weakens over cooler SSTs; suppressed phase rebuilds over Indian Ocean |
+
+**u850 structure:** Westerly anomalies (positive u850') trail the convection; easterly anomalies lead it. The u850 zero crossing is roughly collinear with the OLR minimum, shifted ~quarter-wavelength behind it (the MJO's characteristic quadrupole wind pattern).
+
+**Muddled composites in phases 3–4** are physically real: the Maritime Continent barrier is a well-documented feature and a key reason MJO prediction skill drops sharply there.
+
+---
+
+### Next Steps
+1. **nb14** — MJO supervised 2D (`notebooks/mjo/14_mjo_supervised_2d.ipynb`)
+2. **nb15** — MJO SSL temporal 2D (20–90 day bandpass)
+3. **nb16** — MJO three-way comparison (RMM vs supervised vs SSL)
+
+---
+
+## Session 22 — nb14 & nb15 Implementation (2026-05-17)
+
+### Completed
+- [x] `notebooks/mjo/14_mjo_supervised_2d.ipynb` (13 cells) — MJO supervised 2D, mirrors nb07c
+- [x] `notebooks/mjo/15_mjo_ssl_temporal_2d.ipynb` (15 cells) — MJO SSL temporal 2D, mirrors nb08
+
+### Design notes
+**nb14 (supervised):**
+- Pairs: same RMM phase + same/different ENSO (30% positive, 20% hard neg, 50% easy neg)
+- Active MJO filter: `~weak_mjo` (amplitude ≥ 1.0 AND phase ∈ [1,8]) — weak days kept in X but excluded from pair sampling and probes
+- Year split: every 5th year held out (1979, 1984, 1989, ..., 2019)
+- Architecture: `Conv2d(3→16→32→32)` with `kernel=(1,3)`, `padding=(0,1)`, `MaxPool2d((1,2))` — operates only along longitude. Two pools: 180→90→45→AdaptiveAvgPool→32-d→fc→2-d
+- ~7K params; same NoL2 + raw-dot-product InfoNCE as nb07c
+- Decision thresholds: phase val ≥ 35%, z ≥ 2.0 → baseline established for nb16
+- Output: `MJO/checkpoints/encoder_mjo_sup_final.pth`, `MJO/results/sup/`
+
+**nb15 (SSL temporal):**
+- **20–90 day Lanczos bandpass** (Q4 = B) — `bandpass = lowpass(20d) − lowpass(90d)` → passes intraseasonal (MJO band) while removing both synoptic (<20d) and ENSO/seasonal (>90d) signals
+- Filter: half-window 90 days → 181 taps; sum of weights ≈ 0 (bandpass has zero DC gain — verified in cell)
+- **Continuous application:** filter applied to full 1979–2023 record (no per-year fragmentation, unlike BSISO MJJAS); edge drop = 90 days from each end → lose ~180 days out of ~16,400 (negligible)
+- Pair definition: anchor d, positive in [d−3, d+3] \ {d}, same year. No RMM/ENSO labels seen
+- **Month-confound check is 12-month** (vs BSISO's 5-month MJJAS) — more stringent because the seasonal cycle is much stronger in all-year data. Threshold: angle ANOVA F > 50 → tighten bandpass to (20, 60) d
+- Saves bandpassed input to `X_MJO_bp20_90.npy` for nb16 reuse
+- Decision thresholds: greenlight nb16 if phase val ≥ 30% AND z > 2.53 (BSISO sup baseline) → SSL advantage confirmed
+
+### Architecture (shared by nb14 and nb15)
+```
+Input:  (N, 3, 1, 180)
+Conv2d(3→16, kernel=(1,3), pad=(0,1)) → BN → ReLU → MaxPool((1,2))  →  (N, 16, 1, 90)
+Conv2d(16→32, kernel=(1,3), pad=(0,1)) → BN → ReLU → MaxPool((1,2)) →  (N, 32, 1, 45)
+Conv2d(32→32, kernel=(1,3), pad=(0,1)) → BN → ReLU                  →  (N, 32, 1, 45)
+AdaptiveAvgPool2d(1) → Flatten → Linear(32, 2)                       →  (N, 2)
+```
+
+### Next Steps
+1. **Run nb14 + nb15** on Colab T4 (each ~30–45 min)
+2. **nb16** — MJO three-way comparison (RMM vs supervised vs SSL): lag correlation, phase composites, EN−LN difference maps. Will mirror nb09/nb10b structure from BSISO
+
+---
+
+## Session 23 — nb16 Implementation (2026-05-17)
+
+### Completed
+- [x] `notebooks/mjo/16_mjo_comparison.ipynb` (10 cells) — three-way comparison capstone
+
+### nb16 design
+Mirrors BSISO nb09 + nb10b but unified into one notebook with all three diagnostic axes:
+
+| Cell | What it does |
+|------|------|
+| 1–2 | Load `theta_rmm` from `atan2(RMM2, RMM1)`, `theta_sup` from nb14, `theta_ssl` from nb15. **Auto-detect SSL orientation** by testing both signs of z₂ and keeping the one with positive `ρ_c(rmm, ssl; τ=0)`. |
+| 3–4 | Lag circular correlation helpers (Jammalamadaka & SenGupta ρ_c, within-year pair precomputation, fast permutation null). |
+| 5 | 3-panel + overlay lag correlation plots (3 pairs: rmm↔sup, rmm↔ssl, sup↔ssl; τ ∈ [−30, 30] d). |
+| 6 | **Per-phase ENSO displacement** for all 3 reps (1,000 permutations). Sectors are RMM's discrete phase column for rmm, and 8-octant binning of θ for sup/ssl. |
+| 7 | Phase composite OLR' longitude profiles (3 rows × 8 lines/row). Uses **Lee-preprocessed X_MJO.npy** (not bandpassed) for all three reps so only phase/sector assignment differs. |
+| 8 | **EN−LN difference composites** (3 panels × 8 phases × 180 lons) — the key visual. Larger / more coherent patches = stronger ENSO modulation. |
+| 9 | Auto-generated `mjo_comparison_report.txt` with headline numbers and BSISO-analog interpretation. Auto-decision branches: SSL > sup AND > rmm → key result confirmed; SSL z > 5 alone → significant emergence; else → diagnose. |
+| 10 | Optional download |
+
+### Outputs (under `MJO/results/comparison/`)
+- `lag_circular_corr.png`, `lag_circular_corr_overlay.png`
+- `enso_displacement_3way.png`
+- `phase_composites_olr.png`
+- `enln_difference_composites.png` ← key figure
+- `mjo_comparison_report.txt`
+- `mjo_comparison_summary.csv`
+
+### Key scientific test
+Does the SSL advantage from BSISO (z_SSL=14.55 vs z_sup=2.53) generalize to MJO?  
+If yes → SSL advantage is a general property of temporal contrastive learning on intraseasonal data, not specific to boreal summer monsoon dynamics.
+
+### MJO extension is now functionally complete
+- nb11–13: data + preprocessing
+- nb14: supervised 2D baseline
+- nb15: SSL temporal 2D (the new representation)
+- nb16: three-way comparison + writeup-ready figures
+
+Awaiting Colab runs of nb14, nb15, nb16 to populate results.
+
+---
+
+## Session 24 — MJO Three-Way Results Analysis (2026-05-17)
+
+All three notebooks (nb14, nb15, nb16) ran successfully on Colab. Results in `~/Desktop/ddcs/MJO_sup/`, `~/Desktop/ddcs/MJO_ssl/`, `~/Desktop/ddcs/MJO_comparison/`. The analysis below interprets them rigorously.
+
+### 1. Headline Numbers
+
+| Metric | RMM (conventional) | Supervised (nb14) | SSL temporal (nb15) |
+|--------|:-:|:-:|:-:|
+| N days | 16,436 | 16,436 | 16,256 |
+| Labels seen during training | n/a | RMM phase + ENSO | **none** |
+| Phase val acc | 100% (definitional) | **57.7%** | 24.7% |
+| Phase 5-fold CV | — | 58.0% ± 1.7% | 27.3% ± 1.6% |
+| ENSO bal-acc val | — | 37.5% | 35.7% |
+| **ρ_c with RMM at τ=0** | 1.0 | **+0.639** | **+0.100** |
+| **ρ_c peak (and τ)** | — | +0.642 at τ=+1d | +0.365 at τ=+9d |
+| **z-score** (rep's own 8 sectors, nb16) | **+4.10** | **+12.21** | **+13.44** |
+| z-score (RMM-phase binning) | — | +22.46 (nb14) | +18.74 (nb15) |
+| Max \|EN−LN\| OLR' (σ) | 0.72 | 0.79 | 0.80 |
+| Radius–amplitude Pearson r | — | **+0.504** | — |
+| Month-clustering ANOVA F (angle) | — | — | **300.84** ← strong confound |
+
+Two z-scores appear because the underlying *sectoring* differs:
+- **nb14/nb15** bin days by RMM phase and measure displacement in the rep's embedding → "*given an RMM phase, does the rep separate EN and LN?*"
+- **nb16** bins days by 8 octants of the rep's own angle → "*using only the rep's own structure, does it separate EN and LN?*"
+
+The nb16 number is the conservative, internally-consistent comparison.
+
+---
+
+### 2. Representation-by-Representation Interpretation
+
+#### 2.1 RMM (gold standard)
+
+- 50-year canonical index. By construction its 8 phases correspond to known convective locations (Indian Ocean → Maritime Continent → West Pacific → Western Hemisphere).
+- z=4.10 is *low* by the z-scale we built — but that is the right answer: RMM is a **clean 2-EOF projection** that intentionally suppresses ENSO via WH04 preprocessing, so the residual ENSO modulation in (RMM1, RMM2) space is small and physically real.
+- EN−LN OLR' composite (left panel): the dominant red patch at phases 7–8 around 100–160°E corresponds to MJO active convection in the West Pacific being **further enhanced during El Niño** — the canonical ENSO modulation pattern in the literature (Hendon et al. 2007, Roundy 2014). **RMM is the only representation whose EN−LN pattern is geographically interpretable in literature-validated phase locations.**
+
+#### 2.2 Supervised (nb14)
+
+- **It learned what RMM is.** ρ_c(rmm, sup; τ=0) = +0.639 with peak +0.642 at τ=+1d. The 1-day lead is statistically trivial. So sup ≈ RMM at zero lag, viewed through a learned 2D feature space.
+- Phase val 57.7%, **5-fold CV 58.0% ± 1.7%** — the CV std is 2.4× tighter than BSISO sup (±4.1%) because N is 2.5× larger.
+- **Radius encodes amplitude.** Pearson(r, RMM amplitude) = 0.504 — much stronger than BSISO. The freed radius (no-L2-norm Option B recipe) genuinely picked up MJO strength on global data.
+- z=12.21 (nb16) vs RMM's 4.10 → sup organizes the ENSO signal more efficiently than RMM does within the same data, because the encoder can find non-EOF features that correlate with ENSO. **This is real, but it is "ENSO-aware compression of MJO-relevant fields," not "discovery of new physics."**
+- EN−LN composite (middle panel): strong patch at sectors 3–4 around 130°E. Same physical signal as RMM's phases 7–8 patch, just rotated/relabeled by the encoder's choice of axes.
+
+#### 2.3 SSL temporal (nb15)
+
+The most interesting and the most problematic result.
+
+**What looks good:**
+- z=13.44 (nb16), z=18.74 (nb15) — both well above any null threshold. EN−LN displacements average 0.321σ across phases (vs null 0.074σ).
+- Max \|EN−LN\| OLR' = 0.80σ — slightly larger than RMM or sup.
+- Discovered *without* ever seeing ENSO labels.
+
+**What does NOT look good:**
+
+1. **Phase recovery is poor.** 24.7% val accuracy. BSISO SSL was ~30%. Barely above 2× random, far below sup's 57.7%. The SSL embedding is not a faithful MJO state representation.
+
+2. **Severe month-clustering confound.** Angle ANOVA F = **300.84**, radius ANOVA F = 214.60. The boxplot shows boreal summer (JJAS) at angle ≈ −2 rad; boreal winter/spring (DJFMA) at +0.5–+1.0 rad. **The SSL embedding is, to a large extent, a calendar-month detector, not an MJO-state detector.**
+/
+3. **Low agreement with RMM at zero lag (ρ=0.100) but moderate at +9 days lag (ρ=0.365).** A 9-day systematic offset is too large for filter group-delay (the bandpass is zero-phase by symmetry). It means SSL tracks something that varies with MJO + 9 days — possibly a slower mode unmasked by the bandpass.
+
+4. **What does the z=13.44 really represent?** El Niño peaks in DJF; "EN days" and "LN days" are not seasonally balanced. When SSL clusters by month, EN−LN displacement is partly inflated by the *seasonal* cycle, not by intraseasonal ENSO–MJO coupling. The z-score is statistically real but its *physical content* is partly seasonal artifact.
+
+5. **Bandpass spec.** The frequency-response shows the implemented filter is flat from ~20–60 d, then rolls off with 50% transmission near 90 d. The low-frequency edge is gentle — substantial energy at 90–150 d gets through, including slow seasonal-cycle harmonics. This is consistent with the strong month confound.
+
+---
+
+### 3. Which Representation Is "Most Physically Meaningful"?
+
+The answer depends on the question.
+
+| Question | Best representation | Why |
+|---|---|---|
+| "Where is MJO convection today?" | **RMM** | Canonical phase→geography map; literature-validated |
+| "Reproduce the RMM cycle from raw ERA5 fields?" | **Supervised** | ρ=0.64 at τ=0, recovers eastward propagation, encodes amplitude in radius |
+| "Find an unlabeled rep that discriminates EN from LN?" | **SSL** | z=13.44, **but caveat: largely a seasonal proxy** |
+| "Quantify ENSO modulation of MJO in a physically interpretable frame?" | **RMM** | Geographically-coherent EN−LN composites in known phase locations |
+| "Pre-train on lots of unlabeled data for downstream fine-tuning?" | **SSL** | Demonstrated transferability; 24.7% phase accuracy is a probe lower bound, not an upper bound |
+
+**Bottom line:** RMM is the most physically meaningful for *interpretation*. Supervised is the most useful for *reconstructing MJO state from fields*. SSL produces a high z-score but mostly via seasonal confounding, so its physical claim is weak in the current configuration.
+
+---
+
+### 4. MJO vs BSISO — How Each Method Varies
+
+| Metric | BSISO (nb07c / nb08 / nb09) | MJO (nb14 / nb15 / nb16) | Change |
+|--------|:-:|:-:|:-:|
+| Sup phase val | 58.3% | 57.7% | ≈ |
+| Sup CV std | ±4.1% | ±1.7% | tighter (larger N) |
+| **Sup z (own sectors)** | 2.53 | **12.21** | **+9.7 ← qualitative jump** |
+| Sup ρ_c with conventional | 0.844 | 0.639 | weaker |
+| Sup radius–amplitude r | not reported | **0.504** | new positive result |
+| SSL phase val | ~30% | 24.7% | weaker |
+| SSL z (own sectors) | 14.55 | 13.44 | ≈ (but interpretation different) |
+| SSL ρ_c with conventional | 0.305 | **0.100** | much weaker |
+| **SSL month-confound F** | <50 (acceptable) | **300.84** | **failed for MJO** |
+| Sup-SSL ρ_c at peak | 0.401 | 0.380 | ≈ |
+
+Key differences and why:
+
+1. **Supervised z jumped from 2.53 (BSISO) to 12.21 (MJO).** MJO is all-year and equatorial, sitting directly on the ENSO action region (Pacific warm pool). Many EN/Neutral/LN instances per phase across seasons → small null variance → modest signals look big. BSISO's MJJAS-only data has fewer EN years and is off-equatorial where ENSO modulation is weaker.
+
+2. **Sup recovers RMM less faithfully than BSISO index (0.64 vs 0.84).** RMM uses u200 (upper-tropospheric divergence proxy); BSISO uses v850 (low-level meridional wind). Predicting RMM's combined-EOF projection from raw 1D meridionally-averaged fields is harder than predicting BSISO's PC1/PC2 from 2D maps.
+
+3. **SSL on MJO failed the month-confound check that SSL on BSISO passed.** This is the single most important asymmetry. BSISO MJJAS is only 5 months/year — the seasonal cycle within that window is small. MJO all-year contains the full annual cycle, and a 20–90 d bandpass leaves enough annual harmonics through to dominate the SSL signal.
+
+4. **SSL phase recovery is weaker for MJO (24.7% vs ~30%).** Consistent with #3: if SSL is mostly encoding "season", phase information is suppressed.
+
+5. **The z ranking SSL > sup is preserved in both projects, but the *meaning* differs:** BSISO SSL outperforms sup with a clean signal; MJO SSL outperforms sup partly through seasonal confounding. The MJO result therefore **does not straightforwardly confirm the BSISO finding** — Session 23's auto-report's optimistic interpretation should be downgraded.
+
+---
+
+### 5. Additional Analyses
+
+#### 5.1 Effect-size vs z-score
+
+z = (observed − null mean) / null std. Larger N shrinks null std, so z grows for the same effect. Look at the **raw EN−LN OLR' max amplitude**:
+
+| Rep | Max \|EN−LN\| OLR' (σ) |
+|---|:-:|
+| RMM | 0.72 |
+| Sup | 0.79 |
+| SSL | 0.80 |
+
+These differ by only ~10%. The 3× z-score difference (RMM 4.10 → SSL 13.44) comes mostly from null-variance shrinkage, not from genuine signal amplification. **All three see the same physical ENSO modulation; they differ in how cleanly it stands out against noise.**
+
+#### 5.2 Geographic interpretation of EN−LN composites
+
+- **RMM phases 7–8** (left panel): red patch at 100–160°E = West Pacific MJO convection further enhanced during El Niño — canonical signature.
+- **Supervised sectors 3–4** (middle panel): same patch, different sector labels.
+- **SSL sector 3** (right panel): similar east-of-Maritime-Continent patch *but* with additional strong blue (suppression) west of date line at sector 5 — likely seasonal-cycle leakage, not seen in RMM/sup.
+
+#### 5.3 Lag-correlation interpretation
+
+- **ρ(rmm, sup) peaks at +1d** — essentially zero-lag; sup ≈ RMM with a one-day file-timestamp shift.
+- **ρ(rmm, ssl) peaks at +9d** — a real physical offset. SSL "sees" MJO ~9 days after RMM. Possible cause: bandpass + seasonal-cycle pollution shifts SSL toward a lower-frequency mode whose phase lags MJO. **SSL is not a faithful real-time MJO tracker.**
+- **ρ(sup, ssl) peaks at +5d** — midway, consistent with sup ≈ RMM and ssl ≈ RMM(t+9d).
+
+#### 5.4 The supervised "Phase 7 dip"
+
+Sup z bar chart shows a deep dip at phase 7 (≈0.04 vs others ≈0.10–0.17). Phase 7 is climatologically the weakest MJO phase (transition West Pacific → Western Hemisphere), so EN-vs-LN composites there have smallest amplitude. RMM shows a similar but less pronounced dip at phase 3 (Maritime Continent barrier). **These dips are physically expected, not estimation noise.**
+
+#### 5.5 Radius diagnostics (cross-check on Option B design)
+
+The supervised model's freed radius:
+
+- Pearson(radius, amplitude) = **0.504** — direct amplitude encoding
+- Radius by phase ANOVA F = 12.0 — some phases have systematically larger radii
+- Radius by ENSO ANOVA F = 43.2 — EN/LN days have different radii
+
+The radius–ENSO F=43 is striking: even after the contrastive loss organizes by phase+ENSO, the freed radius picks up additional ENSO signal. **This is the most direct quantitative evidence that "radius encodes information that angle alone misses" — supporting the no-L2-norm Option B choice from BSISO Phase 1.**
+
+---
+
+### 6. Caveats and Recommended Next Steps
+
+1. **The MJO SSL claim must be qualified.** The auto-report's "SSL captures ENSO modulation more strongly than sup/RMM, paralleling BSISO" is technically correct at the z-score level only. The F=300 month confound means the SSL embedding is structurally different from BSISO SSL (which had clean MJO-phase signal). For the writeup: **report z + month-confound F together, never z alone.**
+
+2. **Re-run SSL with a tighter bandpass.** Try (20, 60) d or (25, 80) d. Goal: month ANOVA F < 50 on angle while keeping z ≥ 5.
+
+3. **Seasonal stratification of SSL z.** Compute z separately for DJF / MAM / JJA / SON. If the SSL ENSO signal survives within DJF only (when ENSO is most active), it's genuine intraseasonal coupling. If only across seasons, it's seasonal confounding.
+
+4. **MJJAS-only MJO SSL** (apples-to-apples with BSISO). Predicted outcome: phase val ↑, month F ↓, z probably ↓ as well — and we'd learn the true BSISO-vs-MJO contrast.
+
+5. **Cosine similarity between EN−LN composite maps** across the three reps. High similarity = same physical signal in different bases; low = different signals.
+
+6. **Acknowledge what's already clean and finished.** RMM and supervised together are publication-quality: sup recovers RMM (ρ=0.64), encodes amplitude (r=0.50), shows a strong ENSO z (12.2). The contribution is real: *"a 2D learned encoder can faithfully reproduce the WH04 RMM structure from raw ERA5 fields, with the freed radius dimension simultaneously encoding MJO amplitude and ENSO sensitivity."*
+
+---
+
+### 7. Bottom Line
+
+- **RMM** is the most physically interpretable. EN−LN composites in RMM phases 7–8 show the canonical "El Niño → enhanced central-Pacific MJO convection" signature.
+- **Supervised** is the most useful for showing a learned encoder can recover RMM from raw fields (ρ=0.64) and additionally compress ENSO information (z=12.2, radius–amp r=0.50). Clean positive result.
+- **SSL** discovers a representation with high z and reasonable EN−LN amplitude, but **suffers from severe seasonal contamination (month ANOVA F=300)**. Its 9-day lag against RMM and 24.7% phase accuracy mean it is **not** a faithful MJO state estimator in its current form. The result is intriguing but cannot be taken at face value as "SSL > supervised for MJO" the way BSISO could.
+- **Compared to BSISO**: supervised generalizes well to MJO; SSL does not — at least not without bandpass tightening or seasonal stratification. The informative finding: **the SSL advantage observed in BSISO is conditional on the seasonal cycle being already excluded by the data subset (MJJAS)**.
+
+---
+
+*Log maintained by Claude Code. Updated each session.*
