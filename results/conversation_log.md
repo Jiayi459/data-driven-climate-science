@@ -2583,4 +2583,191 @@ The radius–ENSO F=43 is striking: even after the contrastive loss organizes by
 
 ---
 
+## Session 25 — Lat-aware MJO CNN Plan (2026-05-21)
+
+### Motivation
+
+Session 24 left one clear problem with the MJO SSL result: **month-clustering ANOVA F = 300.84** on the SSL angle. The current nb13 preprocessing meridionally averages 15°S–15°N into a single longitudinal profile per variable → input shape `(N, 3, 1, 180)`. This collapses the meridional dimension before the encoder ever sees it. Two consequences:
+
+1. **All latitudinal structure is gone.** MJO's Rossby-gyre quadrupole, the equatorial Kelvin-wave footprint, ITCZ asymmetries, and the off-equator monsoon signal are all averaged away. The encoder cannot use them to distinguish MJO state from seasonal background.
+2. **The 1D-lon CNN is forced to lean on whatever signal remains in the meridionally-averaged profile** — much of which is the slow annual cycle that leaks through the 20–90 day bandpass.
+
+Hypothesis: giving the encoder access to the full `(lat, lon)` map (and letting it learn how to compress lat) will (a) reduce the SSL month confound, (b) improve SSL phase-recovery accuracy, and (c) sharpen the supervised representation's recovery of RMM.
+
+### Locked design decisions (user-confirmed 2026-05-21)
+
+| # | Question | Decision |
+|---|----------|---------|
+| Q1 | Latitude grid source | **Keep current 15°S–15°N at 2° = 16 lat points**. (User's original message said "31"; reconciled to **16** after seeing it would require a 1° re-download.) |
+| Q2 | Lat → 1 compression style | **Progressive 2D convs with lat-only MaxPool**. Lat dim halved at each block (16→8→4→2→1) using `MaxPool2d((2,1))`. After lat collapses, the existing nb14/nb15 lon-only convs run unchanged. |
+| Q3 | Which notebooks adopt new shape | **Both supervised (nb14b) and SSL (nb15b)**. Apples-to-apples three-way comparison. |
+| Q4 | Versioning | **New notebooks** (`13b`, `14b`, `15b`, `16b`). Drive outputs in a separate `MJO/lat16/` tree so Session 24 results stay intact for ablation comparison. |
+
+### Data shape change
+
+| | Current (Session 24) | New (Session 25) |
+|--|--------------------|------------------|
+| Per-day tensor | `(3, 1, 180)` | `(3, 16, 180)` |
+| Dataset tensor | `(N, 3, 1, 180)` | `(N, 3, 16, 180)` |
+| File on Drive | `X_MJO.npy` | `X_MJO_lat16.npy` |
+| Lat coverage | meridionally averaged | 16 grid points, 15°S → 15°N |
+| Lon coverage | 180 points, 0°–358°E | unchanged |
+| Channel order | `[u850, OLR, u200]` | unchanged |
+
+**Note on the "31" in user's original request.** The figure 31 does not match any standard MJO domain at 2°. After we walked through that 15°S–15°N at 2° gives 16 lat points (not 31), the user chose to keep the existing data. The plan therefore uses **16 lat points**, not 31. Throughout this section, references to "lat-aware" or "lat16" mean 16 lat × 180 lon.
+
+### nb13b — Preprocessing without meridional average
+
+Copy of nb13 with three changes:
+
+1. **Cell that does meridional average → DELETE.** The latitude axis is preserved end-to-end.
+2. **Per-grid-point preprocessing.** Steps 2–4 from nb13 (3-harmonic Fourier annual cycle removal; 120-day preceding running-mean; global-variance normalization) now operate on the full `(N_days, 16, 180)` array per variable instead of `(N_days, 180)`. Implementation:
+   - Step 2 (annual cycle): fit 3-harmonic Fourier per `(lat, lon)` grid point over base period 1979–2001. Subtract per grid point.
+   - Step 3 (120-day mean): compute preceding 120-day rolling mean per `(lat, lon)`. Subtract per grid point. Use the same NaN-patch logic from Session 21's bug fix (first ~120 days have no full history → fall back to step-2 anomaly).
+   - Step 4 (variance normalize): compute **one scalar per variable** = std over (base-period days × 16 lat × 180 lon). One scalar per variable preserves WH04's "equal contribution per channel" intent, just now over the full 2D field rather than the meridional average.
+3. **Save** `X_MJO_lat16.npy` shape `(N, 3, 16, 180)`, plus `latitudes_mjo.npy`, `longitudes_mjo.npy`, `norm_stats_mjo_lat16.json`, `labels_aligned_mjo_lat16.csv`.
+
+Validation cell additions:
+- Phase composite **map** (lat × lon) for each of 8 RMM phases, OLR channel — should show eastward-propagating convective dipole with characteristic off-equator Rossby gyre signature.
+- ENSO composite **maps** (lat × lon) for EN / Neutral / LN, OLR channel — should be near zero if 120-day mean has done its job.
+
+### Architecture (shared by nb14b supervised and nb15b SSL)
+
+```
+Input:  (N, 3, 16, 180)
+
+# Lat-compression stage — 4 blocks of 3×3 conv with lat-only MaxPool
+Conv2d(3 → 16, k=(3,3), pad=1)  → BN → ReLU → MaxPool((2,1))   # (16,180) → (8, 180)
+Conv2d(16 → 32, k=(3,3), pad=1) → BN → ReLU → MaxPool((2,1))   # (8, 180) → (4, 180)
+Conv2d(32 → 32, k=(3,3), pad=1) → BN → ReLU → MaxPool((2,1))   # (4, 180) → (2, 180)
+Conv2d(32 → 32, k=(3,3), pad=1) → BN → ReLU → MaxPool((2,1))   # (2, 180) → (1, 180)
+
+# Lon-compression stage — matches existing nb14/15 1D-lon design
+Conv2d(32 → 32, k=(1,3), pad=(0,1)) → BN → ReLU → MaxPool((1,2))  # (1,180) → (1,90)
+Conv2d(32 → 32, k=(1,3), pad=(0,1)) → BN → ReLU → MaxPool((1,2))  # (1,90)  → (1,45)
+
+# Head
+AdaptiveAvgPool2d(1) → Flatten → Linear(32, 2)
+```
+
+Notes on the architecture:
+- Lat-only pooling means every lat row in the first block sees a 3×3 neighbourhood that includes its N-S neighbours; subsequent blocks coarsen the lat dim toward 1 while keeping lon at full 180 resolution. This is the structure that lets the model learn meridionally-asymmetric features.
+- After block 4 the tensor is `(N, 32, 1, 180)` — same effective shape as the Session-22 1D-lon input, so the second-half lon stages are unchanged from current nb14/nb15.
+- Total params ≈ 14 K (≈2× the 7 K of current nb14/nb15). Still very small for a Colab T4.
+- Both nb14b and nb15b use this **same** architecture. Session 14c's BSISO finding (asymmetric 128/32 capacity for sup/SSL) was specific to a 2D-map BSISO at 31×51. For the lat16 MJO problem the symmetric design is cleaner because the lat axis is small (16) and progressive pooling already provides natural regularization. We log this as the default and will revisit if SSL behaves badly (see open question below).
+
+### Hyperparameters
+
+Same as Session 22 for both notebooks unless noted:
+
+| | nb14b (supervised) | nb15b (SSL) |
+|--|--------------------|-------------|
+| InfoNCE temperature τ | 0.5 | 0.5 |
+| L2 normalization | **OFF** (Option B) | **OFF** (Option B) |
+| Weight decay | 1e-4 | 1e-4 |
+| Bandpass on input | none | 20–90 day Lanczos (per `(lat, lon)`) |
+| Pair construction | same phase + same/diff ENSO (30/20/50) | temporal proximity ±3 days, same year |
+| Active-MJO filter | amplitude ≥ 1.0 AND phase ∈ [1,8] | (none — SSL sees all days post-bandpass) |
+| Year split | every 5th year held out | same |
+| Epochs | 50 | 50 |
+
+The 20–90 day Lanczos bandpass for nb15b must be applied **per `(lat, lon)` grid point**, not after meridional averaging. Implementation: vectorized convolution along the time axis with the same Lanczos taps as nb15, broadcast across the spatial dims.
+
+### nb16b — Three-way comparison (lat16 version)
+
+Copy of nb16 but loads the new embeddings from `MJO/lat16/results/sup/embeddings.npy` and `MJO/lat16/results/ssl/embeddings.npy`. Adds two ablation panels:
+
+1. **Side-by-side month-confound F.** nb15 (meridional avg) vs nb15b (lat16) — does the SSL month-clustering F drop from 300 to <50?
+2. **Phase-recovery delta.** sup phase val and SSL phase val: current vs lat16. We expect both to rise.
+
+All other diagnostics (lag circular correlation, EN−LN composite maps, per-phase ENSO z) carry over unchanged.
+
+### Drive folder layout
+
+```
+BSISO_SSL_Project/MJO/lat16/
+├── data/
+│   └── processed/
+│       ├── X_MJO_lat16.npy
+│       ├── labels_aligned_mjo_lat16.csv
+│       ├── latitudes_mjo.npy
+│       ├── longitudes_mjo.npy
+│       └── norm_stats_mjo_lat16.json
+├── checkpoints/
+│   ├── encoder_mjo_sup_lat16_final.pth
+│   └── encoder_mjo_ssl_lat16_final.pth
+└── results/
+    ├── sup/             ← nb14b outputs
+    ├── ssl/             ← nb15b outputs
+    └── comparison/      ← nb16b outputs
+```
+
+The existing `BSISO_SSL_Project/MJO/data/raw/` files (year-chunked nc files) are reused — no re-download needed.
+
+### Open questions still pending
+
+- **Asymmetric capacity?** Symmetric default is 14 K params for both nb14b and nb15b. If nb15b shows phase val < 30% AND month F > 50, consider running an SSL-only variant with reduced channel widths (3→8→16→16) to mirror the BSISO finding that smaller SSL networks resist seasonal memorization. **Will only revisit if first run shows the symptom.**
+- **Bandpass widening for sup.** nb14b currently has no bandpass on the input (just Lee-style preprocessing in nb13b). Should we also bandpass-filter the supervised input to 20–90 days, to make the sup ↔ SSL comparison even more apples-to-apples? Argument for: removes the same seasonal harmonics from both. Argument against: changes the conventional setup. **Default: no bandpass on sup (matches Session 22).** Flag if results suggest otherwise.
+- **Should validation include a 3-channel/lat-rows-permuted control?** I.e., shuffle lat rows within each sample and re-train — if performance is unchanged, the encoder isn't using the N-S structure we hoped it would. Useful but adds a fourth run. **Defer until we see whether the primary effect (month F drop) appears.**
+
+### Expected outcomes
+
+| Metric | Current (nb15) | Lat16 (nb15b) target |
+|--------|----------------|----------------------|
+| SSL phase val | 24.7% | > 30% (BSISO SSL was ~30%) |
+| SSL angle month-confound F | **300.84** | **< 50** (BSISO threshold from Session 14c) |
+| SSL ρ_c(rmm, ssl) at τ=0 | +0.100 | > +0.2 (closer to BSISO's +0.305) |
+| SSL z-score (own sectors) | 13.44 | Lower (because less seasonal contamination) but still > 5 if the signal is real |
+
+| Metric | Current (nb14) | Lat16 (nb14b) target |
+|--------|----------------|----------------------|
+| Sup phase val | 57.7% | > 60% |
+| Sup ρ_c(rmm, sup) at τ=0 | +0.639 | > +0.7 (closer to BSISO's +0.844) |
+| Sup z-score | 12.21 | similar or slightly higher |
+
+**Falsification criterion.** If after nb15b the month-confound F is still > 100 AND the phase val stays below 30%, the lat-aware change does not solve the seasonal contamination, and we'd need to look elsewhere (tighter bandpass, season stratification, or scope to DJF-only).
+
+### Implementation order
+
+1. **nb13b** — preprocessing (re-uses raw nc files; only re-runs steps 2–5 over the full `(lat, lon)` grid). ~10 min Colab.
+2. **nb14b** — supervised on `X_MJO_lat16.npy`. ~45 min Colab T4.
+3. **nb15b** — SSL on bandpassed `X_MJO_lat16.npy`. ~60 min Colab T4 (bandpass over 16×180 grid is more expensive than 1×180).
+4. **nb16b** — three-way comparison + ablation panels. Local or Colab, ~5 min.
+
+All four notebooks will be drafted in `notebooks/mjo/`. nb13b will be drafted first and submitted for user review before continuing — preprocessing bugs in this domain (Session 21's NaN cascade) are easy to make and hard to spot in downstream results.
+
+### Confirmations / questions for the user before I write code
+
+- ✅ User explicitly asked for the lat-aware change (this session)
+- ✅ Locked: 16 lat (Q1), progressive lat-only pool (Q2), both nb14+nb15 (Q3), new notebooks not in-place (Q4)
+- 🔲 OK with symmetric architecture for nb14b and nb15b (same 14 K-param design)? — flagged above, low-risk default
+- 🔲 OK to skip bandpass on nb14b supervised input (matches Session 22)? — flagged above
+- 🔲 OK with the Drive layout `MJO/lat16/...`? — purely cosmetic
+- 🔲 Want me to draft nb13b first and pause for review, or chain through nb13b → nb14b → nb15b → nb16b in one pass?
+
+Once these are confirmed I will write nb13b first, then chain through depending on the answer to the last question.
+
+### Session 25 follow-up — Confirmations + nb13b drafted (2026-05-21)
+
+User confirmed:
+- ✅ Symmetric architecture for nb14b and nb15b
+- ✅ No bandpass on nb14b supervised input (asymmetric design: sup uses labels as the intraseasonal anchor; SSL uses the bandpass)
+- ✅ Drive layout `MJO/lat16/` is fine
+- ✅ Implementation cadence: write notebooks one by one, **pause for review after each**
+
+**nb13b drafted:** `notebooks/mjo/13b_mjo_preprocessing_lat16.ipynb` — 30 cells. Mirrors nb13 structure but:
+- Cell 5 (`subset-lat`) replaces the meridional-average step; keeps 16 lat points at 2° inside 15°S–15°N. Asserts `n_lat == 16` so a future grid-resolution change can't silently misbehave.
+- Cell 6 (`remove-annual`) uses `remove_annual_cycle_harmonic_3d` — reshapes `(T, 16, 180)` to `(T, 2880)`, runs the same per-column Fourier lstsq as nb13, reshapes back.
+- Cell 7 (`running-mean`) uses `remove_running_mean_3d` — pandas rolling on a flattened `(T, 2880)` DataFrame, same Session-21 NaN guard.
+- Cell 8 (`normalize`) computes one scalar std per variable over `(base_period × 16 × 180)` — preserves WH04's equal-channel intent on the full 2D field.
+- Cell 9 stacks to `(N, 3, 16, 180)` — no singleton lat axis.
+- Cells 11–13 verification: phase composites and ENSO composites are now `(lat, lon)` maps (4×2 and 3×1 grids respectively) instead of 1D longitude profiles. Hovmöller still meridionally averages for display only.
+- Memory: peak ≈ 1–2 GB (within Colab T4 16 GB). Explicit `del` + `gc.collect()` at end of cells 5, 6, 7, 8, 9 to control footprint.
+
+Verification gate (must pass before nb14b): (a) phase-composite blue patch shifts eastward 1→8; (b) Hovmöller shows eastward-tilted band in 1992-93; (c) ENSO composite max|map| < 0.5σ; (d) shape is exactly `(N, 3, 16, 180)`; (e) no NaN in final array.
+
+**Paused for user review** of nb13b before drafting nb14b.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
