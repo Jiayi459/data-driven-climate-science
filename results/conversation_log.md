@@ -2770,4 +2770,621 @@ Verification gate (must pass before nb14b): (a) phase-composite blue patch shift
 
 ---
 
+## Session 26 — Neural State Variables (NSV): BSISO Intrinsic Dimension Plan (2026-05-21)
+
+### 1. Motivation
+
+The deepest question behind our project is not "does ENSO shift the mean BSISO structure?" but rather: **does ENSO add an independent degree of freedom to the BSISO state space?** This is a question about intrinsic dimensionality (ID).
+
+We apply the Neural State Variables (NSV) framework of Boyuan Chen et al. (arXiv:2112.10755, NeurIPS 2022) to estimate the ID of the BSISO dynamical system from raw ERA5 daily fields — without using any phase or ENSO labels. If BSISO ID = 2, ENSO is merely a deformation within the same 2D manifold (amplitude/shape change). If BSISO ID = 3, ENSO occupies an independent degree of freedom in the state space — a qualitatively stronger and more physically informative claim.
+
+---
+
+### 2. NSV Method: Rigorous Summary
+
+**Core insight.** Physical dynamical systems evolve on low-dimensional manifolds even when observed in high-dimensional spaces. The NSV method estimates the true ID from high-dimensional observations in three stages: (1) overparameterize and train a next-step predictor, (2) estimate ID from the latent manifold, (3) compress to ID dimensions using a sinusoidal autoencoder.
+
+**Why overparameterize first?** Directly training with a bottleneck dimension equal to the true ID fails to converge (Chen et al. Fig. 5A — confirmed in the paper). The two-stage approach bypasses this optimization difficulty: train a large (ID >> true) latent first, then estimate and compress.
+
+---
+
+#### Stage 1: Dynamics-Predictive Encoder-Decoder
+
+Train CNN encoder `g_E` and decoder `g_D` to minimize next-timestep reconstruction:
+
+```
+L₁ = E_{X_t}[ ‖ g_D(g_E(X_t)) − X_{t+1} ‖² ]
+```
+
+- Input: consecutive pair `(X_t, X_{t+1})` — two successive daily atmospheric fields
+- Bottleneck: `z_t = g_E(X_t) ∈ ℝ^{64}` (LD = 64, intentionally overparameterized)
+- The encoder must encode enough state to predict tomorrow; it is therefore forced to learn state-relevant features, and by the manifold hypothesis the latent vectors {z_t} lie on a lower-dimensional manifold of dimension = true ID
+
+After training: collect all latent vectors `{z_t}` by running the encoder on the full dataset in eval mode (no dropout).
+
+---
+
+#### Stage 2: Intrinsic Dimension Estimation (Levina-Bickel, 2004)
+
+Given `{z^(1), z^(2), ..., z^(N)} ∈ ℝ^{64}` (deduplicated via `np.unique`):
+
+For each point `z^(i)`, compute Euclidean distances to its k nearest neighbors:
+`T_1^(i) ≤ T_2^(i) ≤ ... ≤ T_k^(i)`
+
+Local maximum-likelihood ID estimate at `z^(i)`:
+```
+m̂_k(z^(i)) = [ (1/(k−1)) × Σ_{j=1}^{k−1} log( T_k^(i) / T_j^(i) ) ]^{−1}
+```
+
+Global ID estimate:
+```
+ID_LB(k) = (1/N) × Σ_i  m̂_k(z^(i))
+```
+
+Sweep k over `k_list = { int(N × c) : c ∈ {0.008, 0.010, 0.012, 0.014, 0.016} }` (5 values, same as Chen et al.). Report `mean(ID_LB) ± std(ID_LB)` across k values.
+
+**Additional estimator — Two-NN (Facco et al. 2017):**
+```
+μ_i = T_2^(i) / T_1^(i)   (ratio of 2nd to 1st nearest-neighbor distance)
+ID_{TNN} = log(2) / mean_i( log(μ_i) )
+```
+Two-NN uses only the two closest neighbors → more robust to manifold curvature, but higher variance.
+
+**Implementation:** `pip install scikit-dimension`. Use `skdim.id.MLE()` (Levina-Bickel) and `skdim.id.TwoNN()`. Also run `skdim.id.lPCA()` as a third check.
+
+The paper compared five methods (Levina-Bickel, MiND-ML, MiND-KL, Hein, CD) and found Levina-Bickel most robust across all their datasets. We report all three Python-accessible methods and take the consensus.
+
+**Decision point**: The estimated ID d̂ = round(mean of Levina-Bickel across k) sets the bottleneck for Stage 3. This is the key scientific result — **pause here for user review**.
+
+---
+
+#### Stage 3: SIREN Refine Autoencoder
+
+Train a SIREN (sinusoidal representation network, Sitzmann et al. 2020) autoencoder on `{z_t}` with bottleneck dimension = d̂:
+
+```
+h_E: z_t ∈ ℝ^{64} → v_t ∈ ℝ^{d̂}
+h_D: v_t → ẑ_t ∈ ℝ^{64}
+L₂ = E[ ‖ h_D(h_E(z_t)) − z_t ‖² ]
+```
+
+SIREN architecture (from Chen et al. model_utils.py):
+```
+h_E: Linear(64→128, sin) → Linear(128→64, sin) → Linear(64→32, sin) → Linear(32→d̂)
+h_D: Linear(d̂→32, sin) → Linear(32→64, sin) → Linear(64→128, sin) → Linear(128→64)
+```
+
+**SIREN activation:** `sin(ω₀ × W·x + b)` — NOT ReLU. The smooth sinusoidal basis represents continuous manifolds far better than piecewise-linear activations.
+
+**SIREN weight initialization (critical):**
+- First layer: `W ~ U(−1/n_in, 1/n_in)`
+- Subsequent layers: `W ~ U(−√(6/n_in)/ω₀, √(6/n_in)/ω₀)`, with `ω₀ = 30` (Sitzmann et al. default)
+- Standard PyTorch initialization produces poor SIREN convergence.
+
+Output: `v_t = h_E(z_t) ∈ ℝ^{d̂}` are the **Neural State Variables**.
+
+---
+
+#### Stage 4: Dynamics Prediction in State Variable Space
+
+Train MLP (LatentPredModel) mapping `v_t → v_{t+1}`:
+```
+f: v_t ∈ ℝ^{d̂} → v_{t+1} ∈ ℝ^{d̂}
+L₃ = E[ ‖ f(v_t) − v_{t+1} ‖² ]
+Architecture: d̂→32(ReLU)→64(ReLU)→64(ReLU)→64(ReLU)→32(ReLU)→d̂ [no final activation]
+```
+
+This stage validates that the d̂-dimensional state variables support genuine dynamics prediction — not just dimensionality reduction.
+
+---
+
+### 3. Recommendation: BSISO First
+
+| Factor | BSISO | MJO | Winner |
+|--------|-------|-----|--------|
+| Data ready? | ✅ X_July.npy from nb03 | ⚠️ nb13b awaiting Colab run | **BSISO** |
+| Core scientific question | ENSO adds a dimension? (ID=2 vs 3) | ENSO adds a dimension? (known RMM=2D) | **BSISO** (our project focus) |
+| Expected ID | 2–4 | 2 (RMM known) | MJO has cleaner ground truth; BSISO more novel |
+| Domain size | (N, 3, 31, 51) — small | (N, 3, 16, 180) — wider | **BSISO** (faster iteration) |
+| Seasonal confound risk | Low (MJJAS data, month F < 50) | High (month F = 300 in nb15) | **BSISO** |
+| Validation reference | BSISO PC1/PC2 from APEC index | RMM1, RMM2 from WH04 | Both equally good |
+
+**Decision: BSISO first.** MJO NSV follows as a validation/comparison study once BSISO pipeline is confirmed.
+
+**Data scope: July only initially.** N_July ≈ 1,320 consecutive pairs (44 years × 30 pairs/year). Levina-Bickel at k ≈ int(1320 × 0.01) = 13 neighbors is marginal but workable. If ID estimate has large std across k values (> 0.5), extend to MJJAS (≈ 6,688 pairs) using the existing nb03 month-filter change.
+
+---
+
+### 4. Data Adaptation: Video → Atmospheric Fields
+
+| Property | NSV paper | Our project (BSISO) |
+|----------|-----------|---------------------|
+| "Frame" | 128×128 RGB image | `(3, 31, 51)` — u850/v850/OLR, 60°E–160°E, 0–60°N at 2° |
+| Consecutive pair | video frames (t, t+1) | daily ERA5 fields (day t, day t+1), same year only |
+| Preprocessing | raw pixel values | Lee et al. anomalies: 3-harmonic annual cycle removed, 120-day running mean removed, variance normalized |
+| Bottleneck LD | 64 | 64 (same) |
+| Expected ID | 2 (pendulum) to ≈20 (reaction-diffusion) | 2–4 (BSISO phase + possible ENSO dimension) |
+| Physical validation | extract pendulum angle from pixels | correlate v_t with BSISO PC1/PC2; ENSO displacement z-score |
+
+**Pair construction detail.** X_July.npy is chronologically ordered: `X[0]` = Jul 1, 1979; `X[30]` = Jul 31, 1979; `X[31]` = Jul 1, 1980; etc. Valid consecutive pairs: `(X[i], X[i+1])` where `dates[i+1] = dates[i] + 1 day` AND same calendar year. Cross-year pairs (Jul 31 → Aug 1 next year) are **not valid** and must be excluded.
+
+**Year-based train/val split.** Hold-out years: 1983, 1988, 1993, 1998, 2003, 2008, 2013, 2018, 2023 (every 5th year, consistent with project convention). Because pairs are within years, each year's pairs go entirely to train or entirely to val — no pair straddles the split boundary.
+
+---
+
+### 5. Stage 1 Encoder-Decoder Architecture (BSISO)
+
+Input: `(N, 3, 31, 51)`. Spatial dimensions are irregular (not power-of-2), so the decoder uses bilinear upsampling (`F.interpolate`) rather than ConvTranspose2d to hit exact output size.
+
+**Encoder `g_E`: `(3, 31, 51)` → `z ∈ ℝ^{64}`**
+
+| Layer | Output shape | Notes |
+|-------|-------------|-------|
+| Conv2d(3→32, k=4, s=2, p=1) + BN + ReLU | (32, 15, 25) | stride-2 spatial downsampling |
+| Conv2d(32→32, k=3, p=1) + BN + ReLU | (32, 15, 25) | refinement |
+| Conv2d(32→64, k=4, s=2, p=1) + BN + ReLU | (64, 7, 12) | stride-2 |
+| Conv2d(64→64, k=3, p=1) + BN + ReLU | (64, 7, 12) | refinement |
+| Conv2d(64→128, k=4, s=2, p=1) + BN + ReLU | (128, 3, 6) | stride-2 |
+| AdaptiveAvgPool2d(1) | (128, 1, 1) | spatial → global |
+| Flatten + Linear(128, 64) | ℝ^{64} | bottleneck z_t |
+
+**Decoder `g_D`: `z ∈ ℝ^{64}` → `(3, 31, 51)`**
+
+| Layer | Output shape | Notes |
+|-------|-------------|-------|
+| Linear(64, 128) + Reshape | (128, 1, 1) | from bottleneck |
+| interpolate(size=(3,6)) + Conv2d(128→64, k=3,p=1) + BN + ReLU | (64, 3, 6) | upsample |
+| interpolate(size=(7,12)) + Conv2d(64→64, k=3,p=1) + BN + ReLU | (64, 7, 12) | upsample |
+| interpolate(size=(15,25)) + Conv2d(64→32, k=3,p=1) + BN + ReLU | (32, 15, 25) | upsample |
+| interpolate(size=(31,51)) + Conv2d(32→3, k=3,p=1) | (3, 31, 51) | output, no activation |
+
+**Total parameter count:** ≈ 140 K (encoder) + 90 K (decoder) ≈ 230 K. Well within Colab T4 capacity.
+
+**Training hyperparameters (Stage 1):**
+
+| Hyperparameter | Value | Rationale |
+|----------------|-------|-----------|
+| Optimizer | Adam, lr=1e-3 | standard for CNNs |
+| LR schedule | CosineAnnealingLR, T_max=100 | smooth decay |
+| Epochs | 100 | conservative start |
+| Batch size | 64 | fits T4 comfortably |
+| Loss | MSE (L2 on normalized fields) | matches NSV paper |
+| Weight decay | 1e-4 | light regularization |
+| Dropout | none in encoder | encoder must not dropout during latent extraction |
+
+---
+
+### 6. Scientific Hypotheses
+
+**H1: BSISO ID = 2.** The BSISO state is fully described by (PC1, PC2) — i.e., the BSISO index phase and amplitude. ENSO modulates the amplitude or shape of cycles within the same 2D manifold but does not add a new dimension. Prediction: d̂ ≈ 2, and v_t strongly correlates (|r| > 0.7) with BSISO PC1/PC2. ENSO displacement z-score in v_t space is similar to what we found in nb05.
+
+**H2: BSISO ID = 3.** The BSISO state requires one additional dimension beyond the 2D oscillation. This extra dimension could encode ENSO state, the Indian Ocean warm pool, or slow background-state memory. Prediction: d̂ ≈ 3, v_{t,3} correlates with Niño 3.4 SST (|r| > 0.3). This would be the first principled demonstration that ENSO occupies an independent degree of freedom in BSISO state space — the project's strongest scientific claim.
+
+**H3: BSISO ID > 3.** BSISO is more complex than the index suggests. Higher-frequency components or spatial degrees of freedom require additional state variables. Would be interesting but harder to interpret physically.
+
+**Most scientifically interesting outcome: H2.** The project is designed to test this.
+
+---
+
+### 7. Notebook Plan
+
+**New subdirectory:** `notebooks/nsv/` (separate from BSISO and MJO notebooks).
+
+#### nb17 — NSV Data Preparation
+`notebooks/nsv/17_nsv_bsiso_data.ipynb`
+
+Drive inputs:
+- `BSISO_SSL_Project/data/processed/X_July.npy` — shape (N, 3, 31, 51)
+- `BSISO_SSL_Project/data/processed/labels.csv` — columns: date, bsiso_phase, enso_cat
+
+Drive outputs (new folder `BSISO_SSL_Project/nsv/data/`):
+- `X_t.npy` — shape (N_pairs, 3, 31, 51), current-day fields
+- `X_t1.npy` — shape (N_pairs, 3, 31, 51), next-day fields
+- `dates_t.npy` — date strings for each pair (for train/val assignment)
+- `bsiso_phase_t.npy` — BSISO phase labels aligned to pairs (for analysis in nb20)
+- `enso_cat_t.npy` — ENSO category labels aligned to pairs
+- `train_mask.npy` — boolean (N_pairs,): True if pair belongs to training split
+
+Tasks in nb17:
+1. Load X_July.npy + labels.csv. Verify shape and date alignment.
+2. Build consecutive pair index array: iterate i=0..N-2; include pair if `dates[i+1] == dates[i] + timedelta(days=1)` AND same year.
+3. Construct X_t = X_July[pair_idx_t], X_t1 = X_July[pair_idx_t1].
+4. Train/val split: hold-out years 1983, 1988, 1993, 1998, 2003, 2008, 2013, 2018, 2023.
+5. Verification:
+   - Assert no cross-year pairs (max consecutive day gap = 1).
+   - Print pair counts: total, train, val. Expected total ≈ 1,320.
+   - Plot 3 random pairs (X_t, X_t1) side-by-side as OLR maps — visually confirm they look like adjacent days.
+   - Print fraction of EN/LN/Neutral in train vs val (rough balance check).
+
+**Pause for user review of nb17 before drafting nb18.**
+
+---
+
+#### nb18 — NSV Stage 1: Encoder-Decoder Training
+`notebooks/nsv/18_nsv_bsiso_stage1.ipynb`
+
+Drive inputs: nb17 outputs
+Drive outputs (`BSISO_SSL_Project/nsv/`):
+- `checkpoints/encoder_stage1.pth` — g_E weights
+- `checkpoints/decoder_stage1.pth` — g_D weights
+- `latents/z_train.npy` — shape (N_train, 64)
+- `latents/z_val.npy` — shape (N_val, 64)
+
+Tasks in nb18:
+1. Define `EncoderBSISO` and `DecoderBSISO` as described in §5 above.
+2. Define `Dataset` class: loads (X_t[i], X_t1[i]) from Drive, returns `(x_t, x_t1)` torch tensors.
+3. Training loop: 100 epochs, Adam + CosineAnnealingLR, batch size 64. Log train/val MSE every epoch.
+4. Verification at end:
+   - Plot train/val MSE vs epoch: expect both to decrease and converge without large gap.
+   - Visualize 4 random validation pairs: (a) X_t OLR map, (b) X_t1 OLR map (target), (c) g_D(g_E(X_t)) OLR map (prediction). Prediction should resemble target spatially.
+   - Check latent vector statistics: `z_train.mean(0)` should be near zero; `z_train.std(0)` should vary across dims (not all equal → not collapsed to one direction).
+5. After training: run g_E on all X_t (eval mode, no grad), save z_train.npy and z_val.npy.
+
+**Pause for user review of nb18.** Key question: does the encoder produce recognizable atmospheric fields? Are train/val losses converging? Are latent vectors non-degenerate?
+
+---
+
+#### nb19 — NSV Stage 2: Intrinsic Dimension Estimation  ← CRITICAL RESULT
+`notebooks/nsv/19_nsv_bsiso_id_estimation.ipynb`
+
+Drive inputs: `latents/z_train.npy`
+Drive outputs: `results/intrinsic_dim.json`
+
+Tasks in nb19:
+1. `pip install scikit-dimension` in Colab cell.
+2. Load z_train.npy. Deduplicate: `z_unique = np.unique(z_train, axis=0)`. Assert N_unique > 500.
+3. **Levina-Bickel (MLE):**
+   ```python
+   import skdim
+   N = z_unique.shape[0]
+   k_list = [int(N * c) for c in [0.008, 0.010, 0.012, 0.014, 0.016]]
+   id_lb = []
+   for k in k_list:
+       est = skdim.id.MLE(K=k)
+       id_lb.append(est.fit(z_unique).dimension_)
+   print(f"LB: {np.mean(id_lb):.2f} ± {np.std(id_lb):.2f}")
+   ```
+4. **Two-NN (Facco et al.):**
+   ```python
+   est_tnn = skdim.id.TwoNN()
+   id_tnn = est_tnn.fit(z_unique).dimension_
+   print(f"TwoNN: {id_tnn:.2f}")
+   ```
+5. **local PCA:**
+   ```python
+   est_lpca = skdim.id.lPCA()
+   id_lpca = est_lpca.fit(z_unique).dimension_
+   print(f"lPCA: {id_lpca:.2f}")
+   ```
+6. Plot: ID estimate vs k (Levina-Bickel), with TwoNN and lPCA as horizontal reference lines.
+7. Save `intrinsic_dim.json`:
+   ```json
+   {
+     "LB_mean": <float>,
+     "LB_std": <float>,
+     "LB_by_k": [<list>],
+     "TwoNN": <float>,
+     "lPCA": <float>,
+     "d_hat": <int>,
+     "N_samples": <int>
+   }
+   ```
+   where `d_hat = round(LB_mean)`.
+
+**PAUSE FOR USER REVIEW OF nb19.** The d̂ value is the primary scientific result. Decide:
+- If d̂ = 2: proceed to Stage 3 with bottleneck = 2. Hypothesis H1.
+- If d̂ = 3: proceed with bottleneck = 3. Hypothesis H2 (most interesting).
+- If d̂ > 3: discuss whether to truncate to 3 or use full d̂.
+- If estimates are noisy (LB_std > 0.5): extend to MJJAS for more samples before deciding.
+
+---
+
+#### nb20 — NSV Stage 3+4+Analysis: Refine, Dynamics, Visualization
+`notebooks/nsv/20_nsv_bsiso_refine_analysis.ipynb`
+
+Drive inputs: `latents/z_train.npy`, `z_val.npy`, `results/intrinsic_dim.json`, `nsv/data/bsiso_phase_t.npy`, `nsv/data/enso_cat_t.npy`
+Drive outputs: `state_vars/v_train.npy`, `v_val.npy`, `results/analysis_figures/`
+
+**Part A — SIREN Refine (Stage 3):**
+1. Define `SirenLayer(in_features, out_features, omega_0=30, is_first=False)`:
+   - Weight init: first layer `U(-1/n, 1/n)`; others `U(-√(6/n)/ω₀, √(6/n)/ω₀)`
+   - Forward: `return torch.sin(omega_0 * (x @ W.T + b))`
+2. Build `SirenEncoder`: `SirenLayer(64,128) → SirenLayer(128,64) → SirenLayer(64,32) → Linear(32,d̂)`
+3. Build `SirenDecoder`: `SirenLayer(d̂,32) → SirenLayer(32,64) → SirenLayer(64,128) → Linear(128,64)`
+4. Train on z_train with MSE, 200 epochs, Adam lr=1e-3.
+5. Extract v_train = SirenEncoder(z_train), v_val = SirenEncoder(z_val).
+
+**Part B — Dynamics MLP (Stage 4):**
+1. Define `LatentPredModel(d̂)`: `d̂→32→64→64→64→32→d̂` (ReLU hidden, no final activation)
+2. Train on consecutive (v_t, v_{t+1}) pairs from v_train. 200 epochs, Adam lr=1e-3.
+3. Evaluate: next-step MSE on v_val. Report normalized MSE (MSE / Var(v_val)).
+
+**Part C — Analysis:**
+
+1. **Phase organization.** If d̂ = 2: scatter plot v_t[:,0] vs v_t[:,1] colored by BSISO phase (8 phases, 8 colors). Expect approximate circular organization. If d̂ > 2: scatter of PCA-PC1 vs PC2 of v_t colored by phase.
+
+2. **Correlation with BSISO PC1/PC2.** Load BSISO index (PC1, PC2) from labels.csv. Compute Pearson r(v_t[:,i], PC1) and r(v_t[:,i], PC2) for each i = 0..d̂-1. Report correlation matrix.
+
+3. **ENSO displacement test** (exact same permutation procedure as nb05/nb09):
+   - Compute centroid(v_train[EN]) and centroid(v_train[LN])
+   - obs_dist = Euclidean distance between centroids
+   - Generate 1,000 permutations of ENSO labels; compute null dist
+   - z = (obs_dist − null_mean) / null_std
+   - Report z-score, compare with our existing results (nb05: z = 11.02, nb09 SSL: z = 14.55)
+
+4. **3rd dimension test (only if d̂ ≥ 3):** Scatter plot v_t[:,2] vs Niño 3.4 index (load from labels.csv). Pearson r and plot. If |r| > 0.3 → the 3rd dimension tracks ENSO.
+
+5. **Long-term rollout.** Starting from 10 random val-set starting points v_0, apply f iteratively for 30 steps. Plot predicted trajectory vs true trajectory in state variable space. Compute cumulative MSE as a function of rollout step.
+
+**Pause for user review of nb20.**
+
+---
+
+### 8. Drive Folder Layout
+
+```
+BSISO_SSL_Project/nsv/
+├── data/
+│   ├── X_t.npy            — (N_pairs, 3, 31, 51), current-day fields
+│   ├── X_t1.npy           — (N_pairs, 3, 31, 51), next-day fields
+│   ├── dates_t.npy        — date strings for each pair
+│   ├── bsiso_phase_t.npy  — BSISO phase aligned to pairs
+│   ├── enso_cat_t.npy     — ENSO category aligned to pairs
+│   └── train_mask.npy     — (N_pairs,) boolean
+├── checkpoints/
+│   ├── encoder_stage1.pth — Stage 1 g_E weights
+│   ├── decoder_stage1.pth — Stage 1 g_D weights
+│   └── refine_encoder.pth — Stage 3 SIREN h_E weights
+├── latents/
+│   ├── z_train.npy        — (N_train, 64) Stage 1 latent vectors
+│   └── z_val.npy          — (N_val, 64)
+├── state_vars/
+│   ├── v_train.npy        — (N_train, d̂) Neural State Variables
+│   └── v_val.npy          — (N_val, d̂)
+└── results/
+    ├── intrinsic_dim.json — {LB_mean, LB_std, TwoNN, lPCA, d_hat, N_samples}
+    └── analysis_figures/  — PDF/PNG figures from nb20
+```
+
+---
+
+### 9. Key Technical Notes and Failure Modes
+
+1. **SIREN weight initialization is non-negotiable.** Using standard PyTorch `kaiming_uniform_` produces poor convergence (SIREN is designed for sinusoidal activations, not ReLU). The custom init in §Stage 3 must be implemented exactly.
+
+2. **Deduplication before ID estimation.** `np.unique(z_train, axis=0)` removes any repeated samples (unlikely here since consecutive days are distinct, but the procedure is required). Duplicate points bias nearest-neighbor distances.
+
+3. **Latent collapse check after Stage 1.** If `z_train.std(0)` shows most dimensions near zero (rank-deficient), the encoder has collapsed — some dimensions carry no information. Symptom: reconstruction looks like the mean field. Fix: reduce weight decay, add noise to bottleneck, or increase encoder capacity.
+
+4. **Year-boundary enforcement.** The pair construction in nb17 must be airtight. Use: `valid = (next_date - current_date == timedelta(1)) AND (current_year == next_year)`. A single cross-year pair included by mistake will create a spurious "dynamics" step that doesn't reflect BSISO evolution.
+
+5. **July sample count.** With 44 years of July data and 30 valid pairs per year, N_train ≈ 1,100 and N_val ≈ 220. This is sufficient for Stage 1 (few-hundred pairs is normal for small physical experiments in Chen et al.) but marginal for ID estimation. If LB_std > 0.5, extend to MJJAS before proceeding.
+
+6. **ID estimate vs integer rounding.** Levina-Bickel and Two-NN produce continuous estimates (e.g., 2.4). Round to nearest integer for the SIREN bottleneck. If the estimate falls exactly between two integers (e.g., 2.5 ± 0.3), train Stage 3 with both d̂ = 2 and d̂ = 3 and compare reconstruction error.
+
+7. **Expected training times on Colab T4:**
+   - nb17 (data prep): < 2 min
+   - nb18 (Stage 1): 10–15 min (1,320 pairs × 100 epochs, 230 K params)
+   - nb19 (ID estimation): 1–2 min (skdim on 1,100 samples × 64 dims is fast)
+   - nb20 (Stage 3+4+analysis): 15–25 min
+
+8. **Objective difference from existing encoders.** Our existing encoders (nb04, nb07c, nb08) were trained with InfoNCE contrastive loss to cluster by BSISO phase + ENSO. The NSV Stage 1 encoder uses MSE reconstruction loss on consecutive pairs — it is shaped by temporal dynamics, not by our prior labels. The two encoders capture different structure, and comparing their IDs is scientifically informative: InfoNCE latent ID = dimension needed to separate our predefined categories; NSV latent ID = dimension needed to represent the underlying dynamical system.
+
+---
+
+### 10. Open Questions (resolved after each notebook)
+
+| # | Question | When resolved |
+|---|----------|---------------|
+| Q1 | Is July data sufficient (LB_std < 0.5)? | After nb19 |
+| Q2 | What is d̂? (2, 3, or higher) | After nb19 — critical |
+| Q3 | Does v_{t,3} (if d̂≥3) correlate with Niño 3.4? | After nb20 |
+| Q4 | Does ENSO z-score in v_t space exceed existing results? | After nb20 |
+| Q5 | Does Phase 1 Stage 1 reconstruction look physically meaningful? | After nb18 |
+| Q6 | If d̂ ≈ 2.5, should we run both d̂=2 and d̂=3 SIREN models? | After nb19 |
+
+---
+
+### 11. Connection to MJO NSV (deferred)
+
+After BSISO NSV is complete:
+- Apply same Stage 1–4 pipeline to `X_MJO_lat16.npy` (from nb13b once it's run and verified)
+- MJO expected ID ≈ 2 (from the RMM definition — the MJO IS a 2D index by construction)
+- If MJO ID = 2 but BSISO ID = 3: demonstrates that the BSISO-ENSO coupling genuinely adds a degree of freedom that the equatorial MJO framework does not capture
+- This comparison would be a strong comparative result between the two intraseasonal modes
+
+---
+
+## Session 27 — nb14b / nb15b Failure Diagnosis (2026-05-22)
+
+User ran `nb14b` and `nb15b` on Colab T4. Both notebooks **failed** — the embedding scatters are degenerate (sup → 1D line, ssl → ring) and Session 25's targets were missed across the board. This session diagnoses the two distinct failure modes and identifies an architectural bug introduced by the Session 25 plan.
+
+### 1. The observed numbers
+
+Auto-summary headlines (from `mjo_sup_lat16_summary.md`, `mjo_ssl_lat16_summary.md`):
+
+| Metric | nb14 (baseline) | nb14b (lat16) | direction |
+|---|:-:|:-:|:-:|
+| sup phase val | 57.7% | **36.3%** | **regressed** |
+| sup phase 5-fold CV | 60.3% ± 1.7% | **40.1% ± 1.3%** | regressed |
+| sup z-score | 12.21 | 19.82 | rose (likely inflated, see §3) |
+| sup Pearson(radius, RMM amp) | 0.504 | **0.228** | weaker |
+| sup radius ANOVA by phase F | n/a | **1311** | huge (rank-1 signature) |
+| sup max norm during training | (typical 2–5) | **1.31** | tiny |
+
+| Metric | nb15 (baseline) | nb15b (lat16) | direction |
+|---|:-:|:-:|:-:|
+| ssl phase val | 24.7% | **18.2%** | **regressed** |
+| ssl z-score | 13.44 | 13.26 | ≈ |
+| ssl **angle month F** | 300.84 | **2888.24** | **~10× worse** |
+
+The lat-aware redesign achieved **the exact opposite** of every Session 25 target.
+
+### 2. Quantitative confirmation of the degenerate geometry
+
+Loading `embeddings.npy` directly and running SVD / Pearson:
+
+| | sup (nb14b) | ssl (nb15b) |
+|---|:-:|:-:|
+| Pearson r(z₁, z₂) | **−0.9996** | −0.19 |
+| SVD ratio σ₁/σ₂ | **72** | 1.27 |
+| Variance explained by PC1 | **99.98%** | 61.8% |
+| Norms: mean ± std (rel. spread) | 0.33 ± 0.21 (**64%**) | 4.37 ± 0.25 (**5.6%**) |
+
+- **sup is rank-1**: z₂ ≈ −z₁ + small intercept. All variation lies on a single line; norms vary widely along that line (64% relative spread). The "phase by line position" pattern visible in the 4-panel scatter is just radius variation along the line.
+- **ssl is on a ring**: full 2D variation but radius is essentially constant (5.6% relative spread). All structure is angular, and the **angle ANOVA F = 2888 says calendar month dominates the angle** — the encoder mapped day-of-year onto position around the ring.
+
+### 3. Training-curve diagnosis
+
+- **sup train curves**: loss plateaus at **~4.08, just below log(64) = 4.16** (the random-chance floor). The supervised contrastive task barely improved over chance. Max norm stayed at 1.31 throughout. **The encoder fell into a rank-1 collapse minimum** — by setting the two rows of `Linear(32, 2)` to be approximate negatives of each other, the dot product `zₐ·z_b` becomes a 1D quantity, and every pair gets a similar near-trivial similarity. Gradient descent finds this plateau and cannot escape.
+- **ssl train curves**: train loss falls smoothly from 3.5 to 1.8, but **val loss diverges from 3.7 to 6.0**. The model memorized seasonal calendar patterns: for held-in pairs (±3 days, same year) it works perfectly, but in val years the in-batch negatives are also seasonally-clustered → their dot products with the anchor become large → InfoNCE softmax assigns mass to negatives → val loss explodes. **Classic seasonal-cycle overfit.**
+
+### 4. Root causes — *two* of them
+
+#### 4a. Architectural asymmetry — feature widening lost on the lon axis (user-identified)
+
+| Stage | nb14 / nb15 | nb14b / nb15b |
+|---|---|---|
+| Lat-compression | — (no lat dim) | **3 → 16 → 32 → 32 → 32** (4 blocks, widens) |
+| Lon-compression | **3 → 16 → 32 → 32** (3 blocks, widens) | **32 → 32 → 32** (2 blocks, frozen) |
+| Linear | 32 → 2 | 32 → 2 |
+
+The Session 25 plan said *"Lon-compression stage — matches existing nb14/15 1D-lon design"* — but only matched kernel shape `(1,3)` and pool shape `(1,2)`, not the channel-widening hierarchy. The feature-widening capacity (3→32) was all consumed by the lat-compression stage; the lon stages were left at a flat 32→32→32 (just spatial downsampling, no new feature learning).
+
+Consequence: **representational capacity is biased toward lat features at every depth, lon features only at the coarsest scale**. But MJO eastward propagation is the canonical lon signal, while seasonal contamination (ITCZ position, monsoon flanks) is the dominant lat signal. The architecture is structurally biased to absorb seasonal pattern and away from MJO phase.
+
+#### 4b. Seasonal-pattern leakage through the bandpass
+
+The lat-aware preprocessing exposes signals the meridional average had suppressed:
+1. **ITCZ N-S migration.** ~10° latitude drift between boreal summer (~10°N) and winter (~0–5°N). Characteristic timescale of weeks–months — *inside* the 20–90 d passband. Lanczos cannot remove it.
+2. **Monsoon flanks and off-equator Rossby gyres** carry strong N-S signatures whose mean position varies with season.
+3. **Lee preprocessing** removes only the 365-d annual cycle harmonics + 120-day running mean — *not* signals at intraseasonal periods.
+
+So preserving the lat axis adds primarily **seasonal pattern leakage at intraseasonal frequencies**, not MJO-state discriminators. Combined with the architectural bias (§4a), this drives:
+
+- **sup → rank-1 collapse.** Encoder discovers ENSO is partially predictable from seasonal N-S pattern (ENSO–season correlation: EN peaks DJF), encodes it in radius and aligns the two output dims anti-parallel. z=19.82 looks impressive but is dominated by an ENSO–calendar coupling, not by an MJO–ENSO coupling at intraseasonal periods.
+- **ssl → calendar-month ring.** Encoder discovers that the temporally-coherent seasonal cycle is the easiest thing to make contrastively consistent at ±3-day windows. Maps day-of-year to angular position on a circle. Month F = 2888 is the smoking gun.
+
+### 5. Why §4a alone wouldn't have caused this on the meridional-average input
+
+The user's architectural observation is **necessary but not sufficient**. The same lon-compression channel collapse (32→32→32) would have produced *some* degradation on `(3, 1, 180)` input, but not the catastrophic seasonal contamination we see — because the meridional-average input does not carry the strong seasonal N-S patterns (§4b). The two causes compound:
+
+- **§4a** = the encoder's *capacity allocation* favors lat features.
+- **§4b** = the lat axis is *full of seasonal contamination*.
+- Together: the encoder dedicates its capacity to learning what is mostly a seasonal calendar, then the supervised loss collapses (because phase+ENSO signal is drowned out) and the SSL loss overfits to the calendar.
+
+### 6. Fix candidates (cheap → expensive)
+
+1. **Architectural fix (Option A)** — preserve nb14/nb15's lon hierarchy *unchanged* by doing the lat-compression at *constant* small channel count, then re-widening across the lon stage:
+   ```
+   Lat:  3→3, 3→3, 3→3, 3→3       # 4 lat-pool blocks at 3 channels (gather N-S only)
+   Lon:  3→16, 16→32, 32→32       # 3 lon-pool blocks, channel widening (matches nb14)
+   ```
+   Lowest-risk change. Reproduces the proven nb14 lon feature pipeline byte-for-byte.
+
+2. **Tighten the bandpass** (nb15b only) — change `(BP_LOW_DAYS, BP_HIGH_DAYS) = (20, 90)` → `(25, 60)` or `(30, 60)`. Removes the slow side where ITCZ drift has most energy. Cheapest possible code change.
+
+3. **Restrict pairs to same calendar month** (SSL) / **add explicit same-week hard negatives** (SUP). Hard-negate the seasonal signal so the encoder cannot use it.
+
+4. **Scope to a season** (e.g., DJFM only) — equivalent to BSISO's MJJAS choice. Drops ~⅔ of data but removes the confound by construction.
+
+Recommended order: **(1) + (2) first** (architecture + bandpass — both code-only, no retraining-data changes). If that still fails, escalate to (3); (4) is the last resort.
+
+### 7. Implications for nb16b and the NSV plan
+
+- **nb16b's three-way comparison is currently moot.** Comparing rmm vs broken-sup vs broken-ssl will give noisy/meaningless numbers. Re-run nb16b only after one of the fix candidates produces non-degenerate embeddings.
+- **Session 26 NSV plan stands.** The NSV pipeline targets BSISO first (where the existing meridional-average preprocessing already works), so this MJO failure does not block NSV. We can either (a) pause MJO and start NSV on BSISO, or (b) fix the MJO architecture and continue MJO first.
+
+### 8. Files reviewed for this diagnosis
+
+- `~/Desktop/DDCS/mjo_sup_lat16_summary.md` — auto-generated nb14b decision text
+- `~/Desktop/DDCS/mjo_ssl_lat16_summary.md` — auto-generated nb15b decision text
+- `~/Desktop/DDCS/embeddings (1).npy` (sup) — `(16436, 2)`, SVD ratio 72, r(z₁,z₂)=−0.9996
+- `~/Desktop/DDCS/embeddings.npy` (ssl) — `(16256, 2)`, norms std/mean = 5.6%
+- `~/Desktop/DDCS/embedding_2d_overview (1).png` — sup 4-panel scatter (confirms line)
+- `~/Desktop/DDCS/embedding_2d_overview.png` — ssl 4-panel scatter (confirms ring; month panel shows clean angular sectors)
+- `~/Desktop/DDCS/training_curves (1).png` — sup train near log(64) floor; max norm 1.31
+- `~/Desktop/DDCS/training_curves.png` — ssl train descends; val diverges to 6.0
+
+### 9. Decision pending
+
+| Question | Pending answer |
+|---|---|
+| Apply architectural fix (Option A) and rerun nb14b/nb15b? | user decision |
+| Tighten bandpass to 25–60 d or 30–60 d? | user decision |
+| Pause MJO lat16 and start NSV on BSISO instead? | user decision |
+
+---
+
+## Session 28 — Architecture Rewrite (Additive-Prefix Design) + Bandpass Tightening (2026-05-22)
+
+User asked the diagnostic question: *"do you think the lon-compression should be the same as nb14/15? why did you change them when you wrote 14b/15b, and why do you think you are wrong now?"* — and approved the fix after the answer.
+
+### 1. Principle adopted
+
+**When modifying a working baseline, preserve the working part byte-for-byte and add changes as additive prefixes/suffixes — never restructure the working components.**
+
+The Session 25 architecture violated this: it presented itself as "match nb14/15's 1D-lon design" but only matched kernel `(1,3)` and pool `(1,2)`, not the channel-widening hierarchy `3 → 16 → 32 → 32`. The widening capacity was redirected into the new lat-compression stage (`3 → 16 → 32 → 32 → 32`) and the lon stages were frozen at `32 → 32 → 32`. This broke nb14's proven lon feature pipeline and removed the graceful-fallback property: if the lat compression had learned weights close to uniform averaging, the rest of the network was *still* structurally different from nb14 and could not recover nb14's performance.
+
+The corrected design treats nb14 as a black box and inserts a lat-compression prefix at constant small channel count, then feeds the result into nb14's lon pipeline unchanged.
+
+### 2. Why I originally chose the wrong design (Session 25 retrospective)
+
+Three contributing biases, recorded so I don't repeat them:
+
+1. **CNN-textbook framing.** I treated the architecture as a "build from scratch" CNN where channel widening should happen progressively at the front and plateau at the back. That framing assumes no prior good design is being preserved.
+2. **Parameter-budget anxiety.** I wanted to keep params ~14 K (and miscounted — actual was 30 K). Worrying about budget pushed me toward capping channels at 32 throughout the lon stages.
+3. **"Lat axis is the new place to learn features" bias.** Because lat was the new dimension, I subconsciously allocated all feature-learning capacity there and treated the lon stages as "spatial downsampling that's already done." That forgot that lon carries MJO eastward propagation — the canonical phase signal.
+
+Process failure: I wrote `"matches existing nb14/15 1D-lon design"` in Session 25 but only matched kernel + pool shape, not channel hierarchy. **Matching the shape is not the same as matching the function.**
+
+### 3. New architecture (replaces `MJOEncoderNoL2Lat16` in both nb14b and nb15b)
+
+```
+Lat-compression prefix — constant 3 channels (4 blocks, lat-only pool):
+  Conv2d(3→3, k=3×3, p=1) → BN → ReLU → MaxPool((2,1))   # (3,16,180) → (3, 8,180)
+  Conv2d(3→3, k=3×3, p=1) → BN → ReLU → MaxPool((2,1))   # (3, 4,180)
+  Conv2d(3→3, k=3×3, p=1) → BN → ReLU → MaxPool((2,1))   # (3, 2,180)
+  Conv2d(3→3, k=3×3, p=1) → BN → ReLU → MaxPool((2,1))   # (3, 1,180)
+
+Lon pipeline — IDENTICAL to nb14 (3 blocks, lon-only pool):
+  Conv2d(3→16, k=1×3, p=(0,1)) → BN → ReLU → MaxPool((1,2))   # (16,1, 90)
+  Conv2d(16→32, k=1×3, p=(0,1)) → BN → ReLU → MaxPool((1,2))  # (32,1, 45)
+  Conv2d(32→32, k=1×3, p=(0,1)) → BN → ReLU                   # (32,1, 45)
+
+Head — IDENTICAL to nb14:
+  AdaptiveAvgPool2d(1) → Flatten → Linear(32, 2)
+```
+
+**Total params ≈ 5.3 K** (lat prefix ≈ 0.35 K, lon pipeline ≈ 4.9 K, linear head ≈ 0.07 K). Down from 30 K in the original nb14b/15b. Closer to nb14's ~7 K. Lower variance, faster to train, and crucially **bounded below by nb14**: if the lat prefix learns near-uniform-average weights, the network behaves like nb14 on uniformly meridionally-averaged input.
+
+### 4. Bandpass tightening (nb15b only)
+
+Change `(BP_LOW_DAYS, BP_HIGH_DAYS) = (20, 90)` → `(25, 60)`. Rationale:
+
+- The slow-side cutoff at 90 d let through substantial energy in the 60–90 d band where ITCZ N-S migration and monsoon-flank seasonal drift sit. Lanczos roll-off is gentle and substantial energy at 80–100 d leaks through.
+- Tightening to 60 d on the slow side removes most of this contamination while preserving the canonical MJO range (30–60 d is the primary MJO band).
+- Tightening to 25 d on the fast side removes 20–25 d synoptic noise that nb15's looser 20-d cutoff included.
+
+Renamed files: `X_MJO_lat16_bp20_90.npy` → `X_MJO_lat16_bp25_60.npy`, and the corresponding labels file. nb16b updated to load the new filename.
+
+### 5. Falsification criterion (this attempt)
+
+This is the *second* attempt at a lat-aware encoder. If after both fixes (additive-prefix architecture + tightened bandpass) we *still* see:
+
+- sup rank-1 collapse (PC1 var explained > 95%) OR
+- ssl month-angle ANOVA F > 100 OR
+- sup phase val < 50% OR ssl phase val < 28%
+
+then the lat-aware idea is structurally incompatible with the current preprocessing and we should **abandon it for MJO** and proceed to NSV (Session 26) on BSISO. The N-S information is informative for monsoon (BSISO) but apparently dominated by seasonal contamination at the equator (MJO).
+
+### 6. Implementation order
+
+1. Edit `MJOEncoderNoL2Lat16` in nb14b — replace class definition + sanity-check shape trace + summary architecture description.
+2. Edit `MJOEncoderNoL2Lat16` in nb15b — same architecture change as nb14b; additionally update `BP_LOW_DAYS=25, BP_HIGH_DAYS=60`, `X_BP_FILE`, `LABELS_BP_FILE`.
+3. Edit nb16b — update `SSL_LABELS_FILE` to the new `bp25_60` filename.
+4. Push all three.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
