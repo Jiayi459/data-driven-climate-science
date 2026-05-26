@@ -3484,4 +3484,78 @@ Ready to draft on user signal. The lat-aware MJO chapter is closed.
 
 ---
 
+## Session 30 — NSV Stage 1 Synoptic-Noise Confound + lp25 Pivot (2026-05-26)
+
+### Pipeline status before this session
+
+nb17 + nb18 + nb19 drafted, run on Colab, results returned. (Switched nb17 from July-only to MJJAS during debugging — the labels.csv assumption was wrong; MJJAS-Lee data was already available and gives 5× more pairs.)
+
+- **nb17** (consecutive-day pairs, MJJAS Lee): 6,536 pairs, gate passed.
+- **nb18** (Stage 1 encoder-decoder, 100 epochs, 2.6 min on T4):
+  - Best val MSE 0.892 vs persistence 1.231 → 27.5% reduction
+  - Train converged smoothly; mild train-val gap (final train 0.611 vs val 0.908)
+  - Reconstructions visually correct: large-scale BSISO patterns recovered, fine synoptic eddies blurred
+  - Latent diagnostics: 64/64 dims active, per-dim std uniform at ~0.031
+- **nb19** (Stage 2 Levina-Bickel + Two-NN + lPCA + controls): **failure to estimate.**
+
+### The Stage 2 failure
+
+```
+FINAL d̂ = 17  (LOW confidence)
+Gaussian-noise control returned 39.4  (expected ≈ 64)
+PC1 = 6.5%, PC2 = 5.3%  →  PCA scree is essentially flat
+PCA scatter shows no BSISO-phase or ENSO organization in PC1×PC2
+```
+
+Three signals point to the same diagnosis:
+
+1. **Estimator saturation.** Levina-Bickel and Two-NN both need `N >> 2^d` samples to estimate ID `d`. With `N = 6,536` the trustworthy range is `d ≲ log_2(6536) ≈ 12–13`. The noise control returning 39.4 (instead of 64) shows the estimators are saturated above ~30. So `d̂ = 17` could mean anything from 17 to 50+ — the estimator can't tell. It's a *ceiling*, not a measurement.
+2. **Flat scree.** A 2-D or 3-D manifold has PC1+PC2 > 90%. Our latent's PC1 is only 6.5%, and the first 15 PCs each carry 3–6% — the geometric definition of "no low-D manifold structure."
+3. **No phase/ENSO organization in PC1×PC2.** The 8 BSISO phases and 3 ENSO categories are completely mixed in the dominant variance directions. Whatever the encoder is encoding, it's not aligned with the conventional state variables.
+
+### Root cause
+
+The Stage 1 encoder was trained to predict tomorrow's full atmospheric field. Daily ERA5 anomaly variance is dominated by **synoptic eddies (~5–10 day timescale)**, not the slow BSISO state (~30–60 day). The encoder, doing its job well, encoded both BSISO state AND synoptic envelope — because both help predict tomorrow's field at 1-day lag.
+
+Chen et al.'s pendulum-style experiments don't have this problem: video frames of a clean pendulum have almost no noise, so ID = 2 falls out cleanly. Daily atmospheric anomaly fields have ~50% synoptic-eddy energy, which the encoder absorbs into the latent.
+
+### Fix: lp25 lowpassed input
+
+The BSISO project already has `X_MJJAS_lee_lp25.npy` + `labels_aligned_mjjas_lee_lp25.csv` on Drive (Lee preprocessing + Lanczos 25-day lowpass, produced by nb08's preprocessing step). Lp25 passes signals slower than 25 days (BSISO at 30–60 d survives), blocks synoptic noise. This is the same data nb08 used to get the clean 2-D circular SSL embedding with z = 14.55 — proof that on lowpassed data the intraseasonal state is genuinely low-dimensional.
+
+### Implementation: nb17b + nb18b
+
+Two new notebooks parallel to nb17/nb18, separate Drive folders:
+
+- **nb17b**: identical to nb17 except source files (`X_MJJAS_lee_lp25.npy`, `labels_aligned_mjjas_lee_lp25.csv`) and output folder (`nsv/data_lp25/`). Wider pair-count tolerance to accommodate the bandpass edge-drop. Adds a per-pixel variance comparison vs nb17 as a sanity that the lp25 fields are smoother.
+- **nb18b**: identical encoder, decoder, hyperparameters, training loop as nb18. Reads from `nsv/data_lp25/`, writes to `nsv/checkpoints_lp25/` + `nsv/latents_lp25/` + `nsv/results/stage1_lp25/`. Cell 5's latent diagnostics now includes a **PCA scree side-by-side with the per-dim std**, with explicit annotation of nb18's PC1 = 6.5% baseline so the reader can see whether lp25 produced a non-flat scree.
+
+For nb19 re-run: only two path strings to change in Cell 1 (`LATENT_DIR` and `RESULTS_DIR`); the rest of nb19 is unchanged. Notebook prints the two lines explicitly at the end of nb18b's Cell 6.
+
+### Expected outcome on lp25
+
+| Metric | nb18 (Lee) | nb18b (lp25) target |
+|---|---|---|
+| Persistence MSE | 1.231 | Lower (smoother data, higher day-to-day autocorr) |
+| Best val MSE | 0.892 | Lower; improvement-over-persistence margin should widen |
+| PC1 fraction of latent variance | 6.5% | > 25%, ideally > 40% |
+| Per-dim std distribution | flat (all ~0.031) | non-uniform — a few large dims, rest smaller |
+| nb19 `d̂` | 17 (saturated) | 2–5, measurable, HIGH or MEDIUM confidence |
+| nb19 noise control | 39.4 | still ~40 (sample-size limit), but real-data `d̂` will be **much smaller**, so the gap restores measurability |
+
+### Decision branches after nb19 lp25 run
+
+| Outcome | Next action |
+|---|---|
+| `d̂ = 2` HIGH confidence | H1 confirmed. BSISO is 2-D; ENSO modulates within. Draft nb20 with SIREN bottleneck = 2. |
+| `d̂ = 3` HIGH confidence | **H2 confirmed (the strongest scientific result).** Draft nb20 with bottleneck = 3 and verify dim-3 correlates with Niño 3.4 SST. |
+| `d̂ = 4–5` | H3 territory. Draft nb20 with bottleneck = `d̂`; check whether the extra dims have physical correlates (Indian Ocean SST, monsoon trough latitude, BSISO-2 mode). |
+| Still saturated / flat scree | The 25-d lowpass wasn't aggressive enough or the encoder is structurally unable to manifoldize. Consider further tightening or different architecture. |
+
+### Status of MJO NSV (deferred from Session 26 §11)
+
+Still deferred. BSISO is the primary testbed; MJO NSV waits until the BSISO pipeline produces a clean `d̂`.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
