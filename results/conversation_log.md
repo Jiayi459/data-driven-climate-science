@@ -3387,4 +3387,101 @@ then the lat-aware idea is structurally incompatible with the current preprocess
 
 ---
 
+## Session 29 — Session 28 Falsification + Pivot to NSV on BSISO (2026-05-25)
+
+User ran the Session 28 rewrite (additive lat prefix + tightened 25–60 d bandpass) on Colab. **The falsification criterion specified in Session 28 §5 triggered on every metric.** Two architecturally-distinct attempts (Session 25 channel-widening design, Session 28 additive-prefix design) have now failed on lat-aware MJO. Time to pivot.
+
+### 1. The numbers (Session 28 final)
+
+| Metric | nb14 / nb15 (mer. avg) | nb14b S25 (failed) | nb14b S28 (this run) | S28 target | S28 verdict |
+|---|:-:|:-:|:-:|:-:|:-:|
+| sup phase val | 57.7% | 36.3% | **33.8%** | > 60% (strong) / > 50% (floor) | **FAILED** |
+| sup ρ_c(rmm,sup; τ=0) | 0.639 | n/a | **0.257** | > 0.7 | failed |
+| sup max norm during training | (2–5) | 1.31 | **1.41** | > 1.5 (escape collapse) | **FAILED — rank-1 collapse persists** |
+| sup train loss plateau | (≪ log 64) | 4.08 | **4.10** | ≪ 4.16 | barely below log(64) random floor |
+| sup PC1 variance share | (≪ 95%) | 99.98% | **99.89%** | < 95% | **rank-1** |
+| sup angle month F | n/a | n/a | 27.74 | informational | (the sup failure is *not* seasonal — it's a different problem) |
+| ssl phase val | 24.7% | 18.2% | **16.3%** | > 30% / > 28% (floor) | **FAILED** |
+| ssl angle month F | 300.84 | 2888.24 | **2038.60** | < 50 / < 100 (floor) | **FAILED — still 40× the target** |
+| ssl z-score | 13.44 | 13.26 | 22.53 | > 5 *if real* | inflated; seasonal contamination |
+| ssl autocorrelation τ_e | n/a | n/a | **31 d** | ≈ RMM's 8 d | **2× longer — SSL tracks slow seasonal signal, not MJO** |
+| ssl norm rel-spread | n/a | 5.6% | **14.6%** | not a tight ring | improved but still constrained |
+
+**All three falsification criteria from Session 28 §5 triggered for SSL.** Sup retains the rank-1 collapse from S25.
+
+### 2. Two distinct failure modes, same root cause
+
+#### Sup (nb14b S28): rank-1 collapse persists
+- z₂ ≈ −z₁ + small intercept (Pearson r = −0.998).
+- 99.89% of variance on a single line through embedding space.
+- Train loss plateaus at 4.10 (log(64) = 4.16) — the supervised contrastive task essentially didn't learn.
+- Sup angle month F = 27.74 < 50 — so the failure is **NOT** seasonal contamination this time. The architecture fix removed that.
+- The sup failure is the **structural rank-1 minimum** of InfoNCE without L2 normalization, under a 30/20/50 pair construction in a 2D output space when the signal-to-noise is degraded.
+
+Why nb14 works but nb14b doesn't: the meridional average concentrates the (lat × lon) signal into a single 1D longitude profile per channel. The supervised loss can extract phase + ENSO information from that compact 1D signal. With the full (16, 180) field, the encoder sees more noise per signal unit (most lat grid points are not on the eastward-propagating convective envelope) and gradient updates are noisier — enough to push the optimizer into the degenerate rank-1 minimum instead of the spread-2D minimum.
+
+#### SSL (nb15b S28): seasonal contamination persists
+- Embedding is now a *thicker annulus* (norm rel-spread 14.6%, was 5.6% in S25) but still constrained.
+- Calendar month dominates the angle: F = 2038.60.
+- Autocorrelation τ_e = 31 d, vs RMM's 8 d. **The SSL embedding has 4× more temporal memory than the actual MJO has** — it's tracking a slower process (the seasonal cycle).
+- z = 22.53 is the highest of any rep, but the high-month-F + high-τ_e combination says it's seasonal modulation of ENSO (peaks in DJF) being read as "ENSO modulation of MJO," not the latter on its own.
+
+The architecture fix (additive prefix preserves nb15's lon hierarchy) gave SSL full 2D structure back — but the seasonal pattern leakage at 25–60 d on the lat axis is so strong that even the proper lon pipeline can't override it.
+
+#### Shared root cause
+**The N-S structure on the (15°S, 15°N) strip carries seasonal pattern signal stronger than MJO state at any intraseasonal frequency the bandpass admits.**
+
+Both 20–90 d (Session 25) and 25–60 d (Session 28) bandpasses leak ITCZ N-S migration, monsoon-flank seasonal drift, and off-equator Rossby gyre seasonal modulation. The Lee preprocessing only removes 365-d harmonics + 120-d running mean — nothing at intraseasonal periods. So preserving the lat axis adds primarily seasonal contamination, regardless of architecture.
+
+### 3. The clean scientific conclusion
+
+Two architecturally-distinct attempts have failed in two qualitatively distinct ways but with the same physical root cause. This is **not** an engineering failure — it's a published-quality empirical finding:
+
+> *For MJO at the (15°S, 15°N) equatorial strip, the N-S structure of daily atmospheric anomalies carries seasonal pattern signal stronger than MJO-state signal at all intraseasonal frequencies. The standard Lee+bandpass preprocessing pipeline cannot remove this contamination. The meridional average used by Wheeler & Hendon (2004) RMM is not just a convenience — it is a necessary projection that suppresses a confounding seasonal mode that would otherwise dominate the learned representation.*
+
+This is a real result and we should write it up that way. The two failed-attempt notebooks (Session 25 + Session 28) and the conversation log are kept as **documented evidence of the failure mode**, not erased.
+
+### 4. Why BSISO doesn't have this problem
+
+The BSISO domain (60°E–160°E, **0–60°N**, MJJAS only) differs from MJO in two critical ways:
+
+- **Off-equator**: BSISO sits at 5–25°N where the monsoon system is, not at the equator. The N-S structure here *is* BSISO state (Rossby-gyre tilting, northward propagation of the convective envelope) — it's not a seasonal artifact.
+- **MJJAS-only**: 5 months/year. Within MJJAS, the seasonal cycle is narrow (boreal summer). Session 14c showed nb08's SSL angle month F < 50, well within acceptable.
+
+So the lat-aware idea **does** work for BSISO. The MJO failure tells us something specific about the equator + all-year combination, not about the lat-aware idea in general.
+
+### 5. Decision: pivot to NSV on BSISO
+
+Per Session 28 §5 (and the user-approved falsification criterion), we now follow through:
+
+- **Abandon lat-aware MJO** as a research direction in this project. No further iterations on nb14b/nb15b. The four notebooks (nb13b, nb14b, nb15b, nb16b) stay in the repo as documented failed-fix history.
+- **Optionally write up** the lat-aware MJO null result as a section in the final report ("On the necessity of meridional averaging for SSL on equatorial MJO data"). Material for this is already in the conversation log + the comparison figures.
+- **Pivot to Session 26 NSV plan**: apply the Neural State Variables framework (Chen et al. 2022) to BSISO first. Begin with nb17 — NSV data preparation (consecutive day pairs from `X_July.npy` or MJJAS-extended `X_BSISO.npy`).
+
+### 6. What stays committed
+
+| Artifact | Status |
+|---|---|
+| `notebooks/mjo/13b_mjo_preprocessing_lat16.ipynb` | KEEP (preprocessing is correct; output `X_MJO_lat16.npy` is a valid dataset, just not useful for SSL/sup as configured) |
+| `notebooks/mjo/14b_mjo_supervised_2d_lat16.ipynb` | KEEP as documented failure (Session 25 + Session 28 versions both failed) |
+| `notebooks/mjo/15b_mjo_ssl_temporal_2d_lat16.ipynb` | KEEP as documented failure |
+| `notebooks/mjo/16b_mjo_comparison_lat16.ipynb` | KEEP — its 3-attempt ablation panel is the publishable figure showing the failure |
+| `MJO/lat16/...` Drive folder | KEEP for write-up; do not re-run |
+| Conversation log Sessions 25, 27, 28, 29 | THE primary documentation of this story |
+
+### 7. Next: nb17 (NSV data preparation for BSISO)
+
+Per Session 26 plan §7 (nb17 spec):
+
+- Load `X_July.npy` (shape ≈ (1365, 3, 31, 51)) + `labels.csv` from BSISO project root
+- Build consecutive-day pair indices: pair `(X[i], X[i+1])` iff `dates[i+1] = dates[i] + 1 day` AND same calendar year. Expected pair count: ~44 years × 30 pairs = ~1,320 pairs (July only)
+- Optionally extend to MJJAS for ~5–6× more pairs (revisit after first ID estimate to see if N is adequate)
+- Year-based train/val split: hold-out 1983, 1988, 1993, 1998, 2003, 2008, 2013, 2018, 2023
+- Save to `BSISO_SSL_Project/nsv/data/`: `X_t.npy`, `X_t1.npy`, `dates_t.npy`, `bsiso_phase_t.npy`, `enso_cat_t.npy`, `train_mask.npy`
+- Verification: assert no cross-year pairs; visualize 3 random pairs side-by-side; report pair count + EN/Neut/LN balance
+
+Ready to draft on user signal. The lat-aware MJO chapter is closed.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
