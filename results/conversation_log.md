@@ -3997,4 +3997,131 @@ This plan is a checkpoint — user requested review before implementation. Once 
 
 ---
 
+## Session 34 — MJO NSV Plan Revised After User Feedback (2026-05-30)
+
+User reviewed Session 33's plan and gave three changes:
+
+1. **Three hypothesis framing, not two.** H1 (d=2), H2 (d=3), H3 (d>3). Originally I framed only two outcomes (d=2 vs d≥3) — too compressed.
+2. **Confirmed preprocessed + bandpass data** — use `X_MJO_bp20_90.npy`. Plan §3 holds.
+3. **Separate notebooks for MJO**, not VARIANT extension of nb19/nb20. The "VARIANT extension" was a one-line string switch in nb19/nb20 that would auto-route to MJO paths. Cleaner to have dedicated MJO notebooks instead — easier to compare BSISO vs MJO side-by-side in the writeup, and the MJO-specific filter logic (active-MJO, RMM column names) lives in its own file. Plan §7 Option A dropped; Option B (separate notebooks) adopted.
+
+Item 1 is the substantive change. Items 2–3 are clarifications.
+
+### 1. Three hypothesis structure
+
+| Hypothesis | d̂ | What it means |
+|---|:-:|---|
+| **H1** | 2 | MJO is fully described by 2 state variables (RMM PC1 + PC2). The Wheeler–Hendon 2-D index is dimension-sufficient. **Interesting asymmetry with BSISO** (which is 4-D): MJO and BSISO differ structurally — perhaps because MJO is a single equatorial Kelvin-Rossby coupled mode, while BSISO has distinct off-equator monsoon Rossby + amplitude + ENSO axes. |
+| **H2** | 3 | MJO needs 3 state variables. The 3rd axis is most likely **RMM amplitude as an independent dimension** (matching BSISO's v2 ↔ amplitude finding), or possibly **ENSO** modulation. Less than BSISO's 4 but still beyond RMM convention. |
+| **H3** | ≥ 4 | MJO matches BSISO. Both intraseasonal modes have undercounted state spaces. **Strongest possible result for the project**: the conventional 2-D intraseasonal indices are systematically too compressed, and the lat-aware lessons (Sessions 27–29) plus the d̂=4 BSISO finding form a coherent story about how machine learning reveals hidden state-space dimensions. |
+
+The decision tree at the bottom of nb22 (the MJO Stage 3+4 notebook) should report which of H1/H2/H3 is supported, with the specific d̂ and the per-dim correlation interpretation (which dim is RMM cos-phase, sin-phase, amplitude, ENSO, etc.).
+
+### 2. MJO notebook plan (separate from BSISO's nb17–nb20)
+
+Three new notebooks in `notebooks/nsv/`, parallel structure to BSISO's nb17b → nb18c → nb19 → nb20 but with `_mjo_` in the filename for clear separation:
+
+| Notebook | Combines BSISO equivalents | Purpose |
+|---|---|---|
+| **`21_nsv_mjo_data_stage1.ipynb`** | nb17b + nb18c | Stage 0 (data prep) + Stage 1 (encoder-decoder) in one notebook. Load `X_MJO_bp20_90.npy`, build lag-10 pairs (with `same_split` rule, not `same_year`), train 1-D Conv encoder-decoder, save z_train/z_val. |
+| **`22_nsv_mjo_id_estimation.ipynb`** | nb19 | Stage 2 ID estimation via Levina-Bickel + Two-NN + lPCA + sanity controls + ENSO-stratified estimates. Independent from nb19's VARIANT switch — separate file dedicated to MJO. |
+| **`23_nsv_mjo_refine_analysis.ipynb`** | nb20 | Stage 3 (SIREN refine to d̂-D bottleneck) + Stage 4 (dynamics MLP `v_t → v_{t+10}`) + per-dim correlations with RMM phase/amplitude/ENSO/DOY + ENSO displacement test against nb14 baseline (z=12.21) and nb16 RMM baseline (z=4.10). |
+
+Why combine nb17b+nb18c into one notebook (nb21)? Because MJO data prep is lighter than BSISO's (just load bandpassed file, build pairs — no lp25 vs lee variant question), and combining into one ~250-line notebook is cleaner than two ~150-line notebooks. The BSISO project had two separate notebooks (nb17b for data, nb18c for Stage 1) only because Stage 1 went through three iterations (nb18, nb18b, nb18c). For MJO we go straight to the working recipe.
+
+### 3. MJO-specific details that nb21, nb22, nb23 must handle
+
+**For nb21 (Stage 0 + Stage 1):**
+- Input: `X_MJO_bp20_90.npy` + `labels_aligned_mjo_bp20_90.csv` from `MJO/data/processed/`
+- Channels `[u850, OLR, u200]` (different from BSISO's `[u850, v850, OLR]` — update docstrings, encoder doesn't care)
+- Squeeze the singleton lat: `X = X.reshape(N, 3, 180)` before training
+- Pair rule: `(delta_days == 10) & (same_split(anchor, target))` — see Session 33 §4
+- 1-D encoder/decoder (Session 33 §5) with bilinear upsample to exact 180 in decoder
+- Output: `MJO/nsv/latents_lag10/z_train.npy, z_val.npy` + label arrays + meta JSON
+- Verification gate: PC1 > 25% on the latent. If lower, try lag=15 in a rerun.
+
+**For nb22 (Stage 2 ID estimation):**
+- Identical methodology to nb19 (LB + Two-NN + lPCA + Gaussian-noise + shuffled-z + ENSO stratification)
+- Use the N-aware confidence threshold from Session 32 (`noise > 3 × d̂`, not `noise > 0.7 × D`)
+- Larger N (~15,500 lag-10 pairs vs BSISO's 4,000) → estimator reliable up to d̂ ≈ 14
+- Decision rule: report H1 (d̂=2), H2 (d̂=3), H3 (d̂≥4) explicitly
+
+**For nb23 (Stage 3 + 4 + analysis):**
+- SIREN refine architecture identical to nb20 (64 → 128 → 64 → 32 → d̂)
+- Same Sitzmann initialization (don't forget — wrong init makes SIREN fail to train)
+- Same Pearson-NaN-masking fix from Session 32 Cell 6 patch
+- Correlations against:
+  - RMM amplitude (continuous)
+  - RMM cos(phase), sin(phase) — replacing BSISO cos/sin
+  - ENSO continuous (EN=+1, Neutral=0, LN=−1)
+  - Day-of-year (year-round — this is the seasonal-confound check; if any v_i has |r| > 0.15, flag for nb16-lat16-style review)
+- **Active-MJO filter for the correlation analysis**: drop pairs where `weak_mjo=True` OR phase ∈ {0, 9}. Don't filter for Stage 1 training (need continuous dynamics).
+- ENSO displacement comparison baselines:
+  - nb14 sup: z = 12.21
+  - nb16 RMM index: z = 4.10
+  - nb15 SSL: z = 13.44 (but month F = 300.84, so caveat)
+  - BSISO Session 32 v-space: z = 12.50 (for cross-mode comparison)
+
+### 4. Stage 4 dynamics MLP gotcha (carried over from Session 31 §3)
+
+The dynamics MLP wants `(v_t, v_{t+10})` pairs. nb20 built these by matching dates 10 days apart in the same year. For MJO all-year continuous data the same date-matching approach works without the same-year constraint — just match dates in v_all where `date_match = date + 10 days` exists.
+
+Be careful: nb20 used `v_all` ordered as `[v_train, v_val]`. nb23 needs the same indexing convention.
+
+### 5. Falsification criteria (unchanged from Session 33 §10)
+
+Same discipline as MJO lat16 abandonment (Sessions 27–29):
+
+- **Stage 1 fails** if val MSE doesn't beat lag-10 persistence by ≥ 10%, OR PC1 < 25%. Try lag=15, then lag=20. If all fail → null result documented.
+- **Stage 2 fails** if d̂ > 14 (estimator saturation at our N), OR shuffled-control d̂ < 3 × real d̂. Either means manifold isn't real.
+- **Stage 3 fails** if SIREN can't reconstruct ≥ 80% of z variance through the d̂-bottleneck. Means d̂ is too small.
+- **Stage 4 fails** if dynamics MLP doesn't beat v-persistence. Means the discovered "state space" isn't dynamical.
+- **Seasonal confound check**: any v dim with |r| > 0.15 against day-of-year is suspicious. The bandpass should have prevented this, but verify.
+
+### 6. Implementation order
+
+1. **nb21**: load + pair + 1-D encoder + train + save latents. ~250 lines. Pause for PC1 verification.
+2. **nb22**: ID estimation. ~200 lines (mostly the same as nb19 with MJO-aware label loading). Pause for d̂ verification.
+3. **nb23**: SIREN refine + dynamics + correlations + ENSO displacement. ~300 lines.
+4. **Document in Session 35** of conversation_log.
+
+Total ~750 lines of code across three notebooks. Should be drafted in one push; user runs each notebook in Colab and reports back after each stage before drafting the next (analogous to BSISO's nb17 → nb18c → nb19 → nb20 sequence).
+
+### 7. Output Drive folder structure
+
+```
+BSISO_SSL_Project/MJO/nsv/
+├── data_lag10/                    ← from nb21
+│   ├── X_t.npy, X_t1.npy            (lag-10 bandpassed pairs)
+│   ├── dates_t.npy
+│   ├── rmm_phase_t.npy
+│   ├── rmm_amplitude_t.npy
+│   ├── enso_cat_t.npy
+│   ├── weak_mjo_t.npy             (for active-MJO filter in nb23)
+│   ├── train_mask.npy
+│   └── nsv_data_meta.json
+├── latents_lag10/
+│   ├── z_train.npy, z_val.npy
+│   └── label arrays (copies for nb22 auto-load — matches BSISO nb18c pattern)
+├── checkpoints_lag10/
+│   ├── encoder_stage1.pth, decoder_stage1.pth, *_best.pth
+│   ├── refine_encoder.pth, refine_decoder.pth, refine_best.pth
+│   └── dynamics_mlp.pth, dynamics_mlp_best.pth
+├── state_vars_lag10/
+│   ├── v_train.npy, v_val.npy
+└── results/
+    ├── stage1_lag10/   (training curves, reconstructions, latent diagnostics)
+    ├── stage2_lag10/   (LB sweep, controls, ENSO-stratified, PCA viz)
+    └── stage3_4_lag10/ (refine training, v-pairs phase/ENSO, dim correlations,
+                         ENSO displacement, dynamics MLP, summary md+json)
+```
+
+Parallel to BSISO's `nsv/...` but under `MJO/nsv/...`. Two pipelines coexist on Drive, no shared paths, no overwrites.
+
+### 8. Ready to implement on user signal
+
+Once approved, I'll draft nb21 first, push, pause for Colab run + PC1 check. Then proceed to nb22, then nb23 with appropriate pause points. Same cadence as BSISO Sessions 30–32.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
