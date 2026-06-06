@@ -4124,4 +4124,63 @@ Once approved, I'll draft nb21 first, push, pause for Colab run + PC1 check. The
 
 ---
 
+## Session 33 (2026-06-02) — Switch all ERA5 inputs from 12:00 snapshot to DAILY AVERAGE
+
+### Motivation
+All four ERA5 download notebooks previously requested `'time': '12:00'` — a single noon-UTC
+snapshot per day. This carries a diurnal sampling bias (instantaneous winds) and, for
+accumulated fields (OLR `ttr`, precip `tp`), the 12:00 value is only a ~1–6 h partial
+accumulation, not a representative daily quantity. Goal: replace every field with a proper
+daily average.
+
+### Decision: Option A (sub-daily download + self-aggregation), uniformly
+- Rejected the CDS "derived-era5-*-daily-statistics" product (Option B): verified via the CDS
+  dataset page that it supports `daily_statistic` + `frequency` but **NOT** `grid` regridding —
+  it is fixed at native 0.25°. Using it would have lost our server-side 2° regridding and
+  inflated files ~64×.
+- Standard `reanalysis-era5-*` hourly datasets keep both `grid: [2.0, 2.0]` and `area`, so we
+  download sub-daily from them and aggregate ourselves.
+
+### Aggregation rule
+- **Instantaneous fields** (u850, v850, u200): download 4×/day `[00,06,12,18]` UTC → `resample('1D').mean()` → daily MEAN.
+- **Accumulated fields** (OLR `ttr`, precip `tp`): download all 24 hourly steps → `resample('1D').sum(min_count=1)` → daily TOTAL.
+- Aggregation happens **inside each download notebook**; the output `.nc` keeps the same
+  one-value-per-day structure, variable names, 2° grid, and domain as before → **downstream
+  preprocessing (nb03, nb13, nb13b, nb09) needs zero changes.**
+
+### Why magnitude of accumulated fields is safe
+Verified nb03/nb13/nb13b consume OLR as `-ds['ttr']` with **no unit division**, then remove the
+3-harmonic annual cycle, remove the 120-day running mean, and **std-normalize**. Any constant
+rescaling (1 h vs 24 h accumulation) is fully absorbed by anomaly removal + normalization. So
+daily-sum vs daily-mean is immaterial downstream — only full diurnal coverage matters.
+
+### CDS field-limit handling
+At 24×/day the single-request OLR (nb01b) and precip (nb01c) downloads = 45 yr × MJJAS × 24 h ≈
+165k fields, above the CDS per-request limit. Those two were re-chunked to **per-year** requests,
+each aggregated to daily and concatenated to the single expected output filename. All other
+requests (nb01 July OLR 33k fields; all winds; nb12 annual chunks) stay within limits.
+
+### Files changed (8 code cells + 1 markdown)
+- `notebooks/01_era5_download.ipynb`: `download-wind` (4×/day mean), `download-olr` (24×/day sum, single request)
+- `notebooks/01b_era5_download_mjjas.ipynb`: `cell-8` wind (4×/day mean), `cell-10` OLR (per-year 24×/day sum + concat)
+- `notebooks/01c_era5_precip_download.ipynb`: `cell-8` precip (per-year 24×/day sum + concat) + header note updated
+- `notebooks/mjo/12_mjo_era5_download.ipynb`: `download-wind` (4×/day mean), `download-olr` (24×/day sum)
+
+### Implementation detail
+Shared helper `_aggregate_daily(sub_file, out_file, keep_vars, how)` in each notebook:
+opens the sub-daily temp file, selects only the physical vars + `reset_coords(drop=True)` to
+strip `number`/`expver` (so the resample reduction doesn't choke on the string `expver` coord),
+resamples to 1D (mean or sum with `min_count=1`), drops all-NaN out-of-season day-bins, writes
+the final daily file, deletes the temp. Resample bins are labelled at 00:00 but downstream code
+calls `.normalize()` so the time-of-day label is irrelevant.
+
+### Status
+- [x] All 4 notebooks edited and validated (valid JSON, no stale bare `'12:00'` in code).
+- [ ] User to re-run downloads on Colab (existing `.nc` files are skipped — must delete or rename
+      old snapshot files to force re-download with the new daily-average logic).
+- [ ] After re-download, re-run preprocessing (nb03, nb13, nb13b, nb09) and downstream training/NSV
+      to refresh all results on the daily-average inputs.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
