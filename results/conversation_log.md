@@ -4124,7 +4124,7 @@ Once approved, I'll draft nb21 first, push, pause for Colab run + PC1 check. The
 
 ---
 
-## Session 33 (2026-06-02) — Switch all ERA5 inputs from 12:00 snapshot to DAILY AVERAGE
+## Session 34 (2026-06-02) — Switch all ERA5 inputs from 12:00 snapshot to DAILY AVERAGE
 
 ### Motivation
 All four ERA5 download notebooks previously requested `'time': '12:00'` — a single noon-UTC
@@ -4174,10 +4174,57 @@ resamples to 1D (mean or sum with `min_count=1`), drops all-NaN out-of-season da
 the final daily file, deletes the temp. Resample bins are labelled at 00:00 but downstream code
 calls `.normalize()` so the time-of-day label is irrelevant.
 
+### Migration notebook (nb00)
+Created `notebooks/00_migrate_snapshot_to_daily.ipynb` — run ONCE on Colab before re-downloading.
+The download cells skip-if-exists on identical filenames, so old snapshot files must be moved out
+of the way or the new daily-average code never runs (silent no-op, no error). nb00 moves all old
+outputs into a `_snapshot12z_backup/` subfolder per raw dir. Safety: moves (not deletes), and is
+idempotent (if a file is already backed up it leaves the current file alone, so re-running after
+the new daily files exist will NOT clobber them). Backup is a subfolder → invisible to the
+non-recursive `os.listdir` globs in preprocessing/verify cells.
+
+### Dependency finding — which downloads are actually needed
+Traced raw→processed→analysis usage across all notebooks:
+- **01b** (`u850_v850_MJJAS`, `OLR_MJJAS`) → nb03 → `X_MJJAS_lee` → ALL BSISO analysis (nb04–08, NSV nb17–20).
+- **12** (`u850_u200`, `OLR_MJO`) → nb13/13b → `X_MJO` → ALL MJO analysis (nb14–16, NSV nb21–23).
+- **01c** (`precip_MJJAS`) → nb10/10b → precipitation forecast ONLY.
+- **01** (July `u850_v850_July`, `OLR_July`): NO current notebook reads these raw files; `X_July`
+  is not written by any current notebook (legacy Approach A/B; current nb03 produces `X_MJJAS_lee`
+  instead). → nb01 is effectively dead for reproducibility; **running 01b + 12 (+01c for precip)
+  regenerates everything.** User confirmed this is their plan.
+
+### CDS cost-limit fix (403) — second edit pass
+First run of 01b cell-4 hit `403 cost limits exceeded` (decade × MJJAS × 4×/day × 2 vars ≈ 13k
+fields too large). Fix: chunk every download into small per-request pieces, aggregate to daily,
+concat into the SAME output filenames downstream expects:
+- nb01b wind: per-year (was decadal) via `_daily_from_subdaily` + concat.
+- nb01 wind: per-year (was decadal); nb01 OLR: per-year (was a single 33k-field July request).
+- nb12 OLR: split each year into TWO half-year sub-requests (months 1–6, 7–12) — a full year ×24h
+  over the global strip (~25M values) exceeds the limit; half-year (~12M) is safe.
+- Left as-is (already small): nb01b OLR (per-year MJJAS), nb01c precip (per-year), nb12 wind
+  (per-year, ~2.9k fields).
+Trade-off: many more sequential CDS requests → slower (45 year-requests for a wind cell ≈ 45–70
+min due to per-request queue overhead), but each clears the cost limit. This is expected, not a hang;
+per-year `... done` prints confirm progress. Decadal `.nc` only appears after each full 11-year block.
+
+### Auth note (nb12)
+nb12 Cell 3 shipped with placeholder `CDS_API_KEY = 'YOUR_CDS_API_KEY_HERE'` (unlike nb01/01b/01c
+which hardcode the real token `bcc4c8e7-...`). Running cell-4 with the placeholder → `401
+Authentication failed`. Important gotcha: Cell 3 printing "CDS API connection: OK" does NOT validate
+the key — `cdsapi.Client()` only reads the local `.cdsapirc`; real auth happens at `client.retrieve()`
+in cell-4. Fix = paste the real token into Cell 3, re-run Cell 3 (rewrites `~/.cdsapirc`), re-run
+Cell 4 (skips already-downloaded years). If still 401: restart runtime and run cells 1→4 in order.
+
+### Commits (all pushed to main)
+- `dab316e` feat(data): switch all ERA5 downloads from 12:00 snapshot to daily average
+- `fd68325` chore(data): add nb00 one-time migration to back up 12:00-snapshot files
+- `9ea6097` fix(data): chunk ERA5 downloads per-year to avoid CDS cost-limit 403
+
 ### Status
-- [x] All 4 notebooks edited and validated (valid JSON, no stale bare `'12:00'` in code).
-- [ ] User to re-run downloads on Colab (existing `.nc` files are skipped — must delete or rename
-      old snapshot files to force re-download with the new daily-average logic).
+- [x] All 4 download notebooks + nb00 migration edited, validated, pushed to main.
+- [x] Confirmed only 01b + 12 (+01c for precip) needed to regenerate all current results.
+- [~] User re-running downloads on Colab: 01b wind in progress (per-year, ~45–70 min expected);
+      01c precip pending; 12 hit a 401 (placeholder key) — needs real token in nb12 Cell 3.
 - [ ] After re-download, re-run preprocessing (nb03, nb13, nb13b, nb09) and downstream training/NSV
       to refresh all results on the daily-average inputs.
 
