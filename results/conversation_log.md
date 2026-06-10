@@ -4297,4 +4297,170 @@ There was briefly a numbering conflict — both my "MJO NSV Plan Revised" entry 
 
 ---
 
+## Session 36 — Barlow Twins Paper Study + User's Temporally-Graded λ(τ) Variant (2026-06-10)
+
+**Status: PAPER INTERPRETATION ONLY — no code changes, no decisions requested.**
+
+User pointed at the Barlow Twins paper (Zbontar et al., ICML 2021, [`arXiv:2103.03230`](https://arxiv.org/abs/2103.03230)) and said this is the next self-supervised learning approach to try after the NSV chapter (Sessions 30–35) for both BSISO and MJO. User also sketched a specific loss modification:
+
+> *"the loss function should be Loss = SSL + (diagonal term) * λ(τ) on covariance matrix 7×7 and τ λ should decrease from 1 to 0.5 as τ increase from 1 to 5 (for example to monitor the changes, as times went by the mode also change slightly"*
+
+This session interprets the paper thoroughly, then unpacks the user's λ(τ) idea, then connects it to our existing SSL infrastructure. **No implementation, no notebook push.**
+
+### 1. Barlow Twins method — core summary
+
+The method's central object is a **cross-correlation matrix** computed between embeddings of two augmented views `Y^A`, `Y^B` of the same input batch. Let `f_θ` be the encoder + projector network and let `z^A = f_θ(Y^A)`, `z^B = f_θ(Y^B)` be the per-batch embeddings, shaped `(N, D)` where `N` is batch size and `D` is the projector output dimension. Mean-center along the batch dim, divide by per-dim std, then:
+
+$$ C_{ij} \;=\; \frac{ \sum_b z^A_{b,i}\, z^B_{b,j} }{ \sqrt{\sum_b (z^A_{b,i})^2} \;\sqrt{\sum_b (z^B_{b,j})^2} } \in [-1, +1] $$
+
+`C` is `D × D`. The loss is:
+
+$$ \mathcal{L}_\text{BT} \;=\; \underbrace{\sum_i (1 - C_{ii})^2}_{\text{invariance}} \;+\; \lambda \underbrace{\sum_i \sum_{j \neq i} C_{ij}^2}_{\text{redundancy reduction}} $$
+
+Two terms that together prevent both kinds of degeneracy:
+
+- **Invariance (diagonal)**: pushes `C_ii → 1`. The same projector dimension should produce the same value on both augmented views. If only this term were present, the network would collapse to a constant.
+- **Redundancy reduction (off-diagonal)**: pushes `C_ij → 0` for `i ≠ j`. The projector dimensions should be statistically decorrelated. This is what prevents collapse — geometrically a constant output cannot have non-trivially-decorrelated dimensions.
+
+`λ` weights the two terms. Paper recommends `λ = 5×10⁻³` for ResNet-50 on ImageNet with projector output 8192.
+
+### 2. Why Barlow Twins is the right successor to our SSL work
+
+We have a clear lineage:
+
+| Method | Negative samples | Embedding dim | Where used in project |
+|---|---|---|---|
+| **InfoNCE / SimCLR-style** (our nb08, nb15) | required (in-batch) | 2-D | BSISO SSL temporal, MJO SSL temporal |
+| **BYOL / SwAV** | none, but uses momentum encoder or codebook | 256-D typical | not used |
+| **Barlow Twins** | none, no asymmetry, no negatives needed | **scales with D** (paper used 8192) | proposed for next round |
+
+The key practical advantages for our pipeline:
+
+1. **No batch-size sensitivity.** Our InfoNCE runs in nb08 / nb15 / nb14b / nb15b all used batch 64 — fine for those experiments, but at that scale InfoNCE's negatives are limited and the gradient is noisy. Barlow Twins works as well at batch 256 as at 2048 per their ablations (Fig 4 / Table 6).
+2. **Geometric collapse safety.** Sessions 27–29 documented several BSISO/MJO SSL failures where the embedding collapsed onto a line (sup) or ring (ssl) under InfoNCE. Barlow Twins' redundancy-reduction term is a *mathematical safeguard* against this — "by construction" per the paper.
+3. **Scales gracefully to larger embeddings.** Our NSV findings give `d̂ = 4` (BSISO Session 32) and `d̂ = 7` (MJO, chat-shared). Both are very low. Barlow Twins benefits from *high* output dimensions — in the paper, even at d=8192 accuracy was still improving. So we have flexibility on the projection-head output size.
+4. **Natural fit with temporal-proximity pairs.** The "two views" in computer-vision Barlow Twins are augmentations (crop + color jitter). For us the natural view-pair is **two time-shifted snapshots** — exactly what nb08/nb15 already construct. So Barlow Twins drops in cleanly.
+
+### 3. Architectural details from the paper, applied to our setting
+
+The paper uses:
+- Encoder: ResNet-50 (output 2048-D)
+- Projector: 3-layer MLP, `2048 → 8192 → 8192 → 8192` (BN+ReLU after first two)
+- Loss applied on projector output (not encoder output)
+- Augmentations: random crop, flip, color jitter, grayscale, Gaussian blur, solarization
+
+Translated to our atmospheric time-series setting:
+
+| Paper convention | Climate-data translation |
+|---|---|
+| Encoder ResNet-50 → 2048-D | Our nb18c-style CNN encoder → 64-D bottleneck (or larger if we want) |
+| Projector 2048 → 8192 (×3 layers) | Smaller projector since we don't need ImageNet-scale capacity. E.g. 64 → 256 → 256 → 256 (the loss-matrix becomes 256×256) |
+| Augmented pair `(Y^A, Y^B)` from same image | Temporal-shifted pair `(X_t, X_{t+τ})` from same time series — same construction nb08/nb15 already use |
+| `λ = 5×10⁻³` | Same starting value should be fine; tune later. **NB: this is `λ` for the off-diagonal weight, distinct from the user's `λ(τ)` proposal — see §4.** |
+| Optimizer LARS, lr 0.2, 1000 epochs, 32 V100s | Adam/AdamW lr 1e-3, 100–200 epochs, single T4. Modest scale. |
+
+### 4. User's `λ(τ)` modification — interpretation
+
+The user's sketch is:
+
+> Loss = SSL + (diagonal term) × λ(τ) on covariance matrix 7×7
+> λ(τ) decreases from 1.0 to 0.5 as τ goes from 1 to 5 days
+> "to monitor the changes, as times went by the mode also change slightly"
+
+Three plausible readings of the equation:
+
+**Reading A (most likely): re-weight the BT invariance term by τ.** The user's "SSL" is the off-diagonal Barlow Twins redundancy term, and the "diagonal term" is the BT invariance term. The new loss is:
+
+$$ \mathcal{L} \;=\; \underbrace{\sum_i \sum_{j\neq i} C_{ij}^2(\tau)}_{\text{decorrelation, kept across all }\tau} \;+\; \lambda(\tau) \cdot \underbrace{\sum_i \bigl(1 - C_{ii}(\tau)\bigr)^2}_{\text{invariance, weakened at larger }\tau} $$
+
+The pair `(X_t, X_{t+τ})` has a `τ`-dependent cross-correlation `C(τ)`. At short τ (τ=1), we *enforce* `C_ii ≈ 1` strongly (λ=1) because adjacent days truly should give the same MJO/BSISO state. At long τ (τ=5), we *relax* this (λ=0.5) because the slow mode has evolved and forcing strict invariance would be wrong.
+
+This is consistent with the user's stated motivation: *"as times went by the mode also change slightly."*
+
+**Reading B (alternative): add the BT diagonal term as a regularizer on top of InfoNCE.** "SSL" means the standard nb08/nb15 InfoNCE loss, and the BT diagonal term is added as a soft regularizer to encourage cross-time invariance:
+
+$$ \mathcal{L} \;=\; \mathcal{L}_\text{InfoNCE}(z^A, z^B) \;+\; \lambda(\tau) \cdot \sum_i \bigl(1 - C_{ii}(\tau)\bigr)^2 $$
+
+Here the off-diagonal Barlow term is dropped; collapse-avoidance comes from InfoNCE's negatives. The τ-graded `λ(τ)` softens invariance at long τ.
+
+**Reading C (closest to Barlow Twins original): use full BT but with τ-graded weighting between diagonal and off-diagonal terms.** Both BT terms are kept; the diagonal carries `λ(τ)` weight, the off-diagonal carries a separate constant `λ_off`:
+
+$$ \mathcal{L}(\tau) \;=\; \lambda(\tau) \cdot \sum_i (1 - C_{ii}(\tau))^2 \;+\; \lambda_\text{off} \cdot \sum_i \sum_{j\neq i} C_{ij}^2(\tau) $$
+
+This generalizes the original BT loss (which has implicit λ_inv=1, λ_off=5e-3) by letting `λ_inv` depend on τ.
+
+**My read**: Reading A is the user's most literal intent given how they phrased the equation ("SSL + diagonal term × λ(τ)" maps to "off-diagonal SSL term + diagonal term weighted by λ(τ)"). Reading C is the cleanest mathematical generalization and easiest to implement. The two are essentially equivalent up to renaming what counts as "the SSL term" — the only practical difference is whether the off-diagonal coefficient stays at `5×10⁻³` or floats.
+
+### 5. The 7×7 covariance matrix — why D = 7
+
+The user said "covariance matrix 7×7". This **matches the MJO NSV finding** (`d̂ = 7`, chat-shared from nb22). So the proposal is:
+
+- **Embedding dim D = 7** (matching MJO ID; for BSISO it would be `D = 4` per Session 32).
+- C is then a 7×7 matrix with 7 diagonal entries (invariance constraints) and 42 off-diagonal entries (decorrelation constraints).
+- The 7-D embedding is supposed to capture exactly the 7-D MJO state space NSV discovered.
+
+This is conceptually different from the paper's setting (where larger D always helps). At very small D the Barlow Twins loss should still work — the redundancy-reduction term has fewer constraints (42 instead of 8000), and the invariance term has 7 instead of 8192. The paper does not have ablations at D as small as 7, but the formula is well-defined and there is no theoretical obstruction.
+
+### 6. The τ ∈ {1, 2, 3, 4, 5} schedule
+
+User specified five lag values, with `λ(1) = 1.0` and `λ(5) = 0.5`. A reasonable linear interpolation:
+
+| τ (days) | λ(τ) |
+|:-:|:-:|
+| 1 | 1.000 |
+| 2 | 0.875 |
+| 3 | 0.750 |
+| 4 | 0.625 |
+| 5 | 0.500 |
+
+Physical interpretation: at τ=1 day, two consecutive atmospheric states should be nearly identical in MJO/BSISO state space → strong invariance. At τ=5 days, BSISO's 30–60 d cycle has advanced ~10–17% of one period; MJO's 30–90 d cycle has advanced ~5–17% of one period. We expect the state vectors to be similar but **not identical** — so a softer invariance constraint (`λ = 0.5`) lets the encoder represent that genuine slow drift without being penalized.
+
+### 7. Connection to the lag-10 NSV pipeline
+
+A subtlety: nb18c (BSISO Stage 1) was trained on `(X_t, X_{t+10})` pairs at fixed lag 10. The motivation (Session 31 §4) was to make persistence non-trivial so the encoder is forced to extract state. The user's Barlow Twins proposal uses τ ∈ {1, ..., 5}, *shorter* than NSV's lag-10.
+
+Two possible reconciliations:
+
+- **Multi-lag training**: sample pairs at all τ in {1, ..., 5} simultaneously, each with its own `λ(τ)`. The encoder learns invariance across the whole window. This is similar to BYOL's multi-view augmentation but using time-shifts as "views".
+- **Sequential curriculum**: train at τ=1 first (strong invariance), then gradually increase τ, then add the off-diagonal Barlow term. Likely overkill for our setting.
+
+**Multi-lag training** is the natural fit for the user's formulation and matches the line "to monitor the changes, as times went by the mode also change slightly."
+
+### 8. What would a notebook implementation look like (sketch, no code yet)
+
+Skeleton:
+
+1. **Loader**: build pair indices for τ ∈ {1, 2, 3, 4, 5} from the daily-mean dataset. Same-split, no leakage. Each batch contains pairs from all τ values (or stratified across τ).
+2. **Encoder + projector**: encoder is similar to nb18c (CNN → 64 latent); projector is a small MLP `64 → 128 → 128 → D` where `D = 7` for MJO, `D = 4` for BSISO.
+3. **Loss**: for each τ in the batch, compute `C(τ)`, then
+   `L(τ) = λ(τ) · diag_term + λ_off · off_diag_term`
+   where `λ(τ)` is the linear schedule.
+4. **Total loss**: weighted sum over τ values.
+5. **Diagnostics**: per-τ on-diagonal mean (should approach 1), per-τ off-diagonal mean (should approach 0), embedding norm trajectory, downstream linear probe on RMM phase / BSISO phase / ENSO.
+
+### 9. Connections to existing project work
+
+- **vs. nb08/nb15 InfoNCE**: same temporal-pair construction, different loss math. BT removes the in-batch negatives requirement.
+- **vs. NSV (nb18–20, nb21–23)**: NSV is a reconstruction-based method (Stage 1 MSE, Stage 3 SIREN refine). Barlow Twins is a similarity-decorrelation method. The two are complementary — NSV gives us the *dimension* of the state space; Barlow Twins gives us a learned representation respecting that dimension.
+- **The d̂ from NSV directly informs the Barlow Twins projector output dim.** This is the design choice that makes the user's proposal cohesive: rather than picking D=8192 like the paper, we pick D=7 (MJO) or D=4 (BSISO) so the SSL embedding lives in the *correct-dimensional state space* discovered by NSV.
+
+### 10. Open questions (for the user to answer when implementation starts)
+
+These are flagged here so they don't get lost, not asked now:
+
+1. **Reading A vs C?** Should off-diagonal be standard BT with constant `λ_off = 5e-3`, or should it also be τ-graded?
+2. **Input to the encoder**: daily-mean `X_MJJAS_lee_lp25` (BSISO) / `X_MJO_bp20_90` (MJO), or something else?
+3. **Encoder reuse**: warm-start from nb18c's encoder weights (Stage 1 already learned a useful 64-D representation), or train from scratch?
+4. **Projector depth/width**: paper uses 3 layers @ 8192. For us with D ∈ {4, 7}, a smaller projector (e.g. `64 → 128 → 64 → 7`) is probably appropriate.
+5. **Where does this fit in the notebook sequence?** Likely `nb24` (BSISO Barlow Twins) and `nb25` (MJO Barlow Twins), or one combined notebook with a VARIANT switch like nb19 had.
+
+### 11. Status
+
+- Paper understood thoroughly.
+- User's `λ(τ)` modification interpreted and connected to the BT loss and our NSV findings.
+- No code written. No new notebooks pushed. No questions asked of the user — they explicitly said *"don't let me make choice only for this conversation"*.
+- This session is a thinking-out-loud record so that when implementation starts (probably after the OLR_MJO daily-mean refresh, per Session 35), the design space is already mapped out.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
