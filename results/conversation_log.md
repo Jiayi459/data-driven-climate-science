@@ -4463,83 +4463,95 @@ These are flagged here so they don't get lost, not asked now:
 
 ---
 
-## Session 37 — Supervised-2D Training-Collapse Fix: Staged Experiment Plan (2026-06-11)
+## Session 37 — BSISO Supervised-2D (nb07c) Training-Collapse Fix on Daily-Average Data: Staged Experiment Plan (2026-06-11)
 
-**Status: PLAN ONLY — written to log per user request; no notebook changes this turn.** OLR daily download for 1987–2023 is running in the background (Session 35/36 follow-up); these experiments will be prototyped on the current data and the final recipe re-validated on the full 1979–2023 `X_MJO` once it lands.
+**Status: PLAN ONLY — written to log per user request; no notebook changes this turn.**
 
-User asked to fix the **training collapse** in the supervised-2D encoder, listing the knobs to explore: learning rate (with a **plateau-based schedule** that drops LR when loss stalls for N epochs), batch size, epochs, weight decay, early stopping, temperature. This entry diagnoses the collapse and lays out a rigorous, one-factor-at-a-time (OFAT) experiment sequence.
+User reported a **training collapse in the BSISO supervised-2D encoder** — [`07c_supervised_2d_no_l2norm.ipynb`](../notebooks/extension_2d/07c_supervised_2d_no_l2norm.ipynb) — when run on the **daily-average** `X_MJJAS_lee.npy` (the snapshot→daily migration). *(Earlier draft of this entry wrongly targeted MJO nb14; corrected here to nb07c BSISO.)* Knobs to explore per user: learning rate with a **plateau schedule** (drop LR when loss stalls for N epochs), batch size, epochs, weight decay, early stopping, temperature. This entry diagnoses the collapse for the BSISO setting and lays out a rigorous one-factor-at-a-time (OFAT) sequence.
 
-### 1. Where the collapse comes from
-
-Target notebook: [`14_mjo_supervised_2d.ipynb`](../notebooks/mjo/14_mjo_supervised_2d.ipynb) (MJO); the same structure exists in BSISO `nb07c`. Current config:
+### 1. nb07c — current setup (BSISO-specific)
 
 | Knob | Current value |
 |---|---|
+| Input | `X_MJJAS_lee.npy`, shape **(N≈6579, 3, 31, 51)** — full 2-D spatial (lat 31 × lon 51) |
+| Channels | **[u850, v850, OLR]** (BSISO domain 60°E–160°E, 0–60°N, MJJAS, Lee preprocessing) |
+| Labels | `labels_aligned_mjjas_lee.csv` — `bsiso_phase`, `bsiso_amplitude`, `enso_category` |
+| Active filter | `bsiso_amplitude > 1.0` |
 | Embedding dim | **2, no L2 normalization** |
-| Loss | **raw dot-product InfoNCE**, `sim = zA·zBᵀ / τ` |
+| Loss | **raw dot-product InfoNCE**, `sim = zA·zBᵀ / τ` (Variant 2) |
 | Temperature τ | 0.5 |
 | Batch size | 64 |
 | Optimizer | Adam, lr 1e-3, **cosine → 1e-5** |
 | Weight decay | 1e-4 |
 | Epochs | 50 (fixed, no early stop) |
 | Grad clip | max-norm 1.0 |
+| Encoder | 3× Conv2d(k=3, pad=1)+BN+ReLU+MaxPool → AdaptiveAvgPool → FC(32→2) |
 
-**Root cause.** A 2-D embedding with *no* L2-normalization under a *raw-dot-product* InfoNCE loss is intrinsically collapse-prone, because the loss is **scale-sensitive**: the softmax over `zA·zBᵀ/τ` can be sharpened either by learning structure *or* trivially by inflating embedding norms / aligning all points along one axis. Three observed/expected failure modes:
+### 2. Where the collapse comes from — and the L2 history that frames it
 
-1. **Norm explosion** — `max_norm` grows (>100); Cell 7 already warns on this. Grad-clip 1.0 only partially contains it; cosine LR doesn't react to it.
-2. **Dimensional collapse onto a line** — all variance in one direction, `λ₂/λ₁ → 0`; the "sup collapsed onto a line" failure noted in earlier sessions.
-3. **Point collapse** — mean norm → 0 (less likely under InfoNCE, which must still separate negatives).
+A 2-D embedding with *no* L2-normalization under *raw-dot-product* InfoNCE is intrinsically collapse-prone, because the loss is **scale-sensitive**: the softmax over `zA·zBᵀ/τ` can be sharpened either by learning structure *or* trivially by inflating norms / collapsing all points onto one axis. Failure modes: (1) **norm explosion** (Cell 7 already warns >100; grad-clip 1.0 only partly contains it, cosine LR doesn't react); (2) **line collapse** (`λ₂/λ₁→0`); (3) **point collapse** (mean norm→0, less likely under InfoNCE).
 
-The no-L2 choice was deliberate (nb07c) so the **radius could encode RMM amplitude** — but that is exactly the constraint whose removal permits collapse. So the plan must treat the *structural* loss design as a first-class variable, not only the scalar knobs.
+**The crucial framing from nb07/07b/07c history** (this is a known trade-off, not a fresh bug):
+- **nb07 / 07b (L2-normalized 2-D):** *stable, never collapses*, but BSISO phase probe **plateaus at ~33%** across all τ — because L2-normalizing a 2-D output pins embeddings to S¹ (a **1-D** circle: only angle matters). z=2.59 best at τ=0.5.
+- **nb07c (no L2, Option B):** drops normalization so the **radius is free** to encode `bsiso_amplitude` — the proper test of "is BSISO genuinely 2-D in R²?". But removing the hypersphere constraint is exactly what *permits* the collapse now observed on daily-average data.
+- **64-D baseline:** phase val 67.7%, z 3.83 — the target ceiling.
 
-### 2. Step 0 — Instrument before tuning (define "collapse" quantitatively)
+So the fix must **thread the needle**: keep the radius free enough to beat the 33% 1-D-circle ceiling, while adding a collapse safeguard the raw-dot loss lacks. The structural loss design is therefore a first-class variable, not just the scalar knobs.
 
-Add per-epoch embedding-geometry diagnostics to the training loop (on a fixed active-MJO eval subset), so every run is judged on collapse, not on raw loss:
+**Why daily-average may be the trigger (hypothesis to test in Step 0):** daily-averaging removes sub-diurnal variance, so the Lee-preprocessed inputs are smoother / lower-variance than the 12 UTC snapshots. Lower input variance → smaller pre-FC activations → the raw-dot loss must inflate FC weights harder to reach the same similarity scale, pushing the norm trajectory toward explosion or a degenerate axis. A quick re-standardization of `X` to unit variance may itself defuse it.
 
-- **Eigenvalue ratio** `r_eig = λ₂/λ₁` of the 2-D embedding covariance. Healthy ≈ 0.3–1.0; **collapse if < 0.05** (line).
-- **Effective rank** (participation ratio) `(Σλ)² / Σλ²` ∈ [1, 2]. Healthy > 1.3; collapse → 1.
+### 3. Step 0 — Instrument + confirm the trigger before tuning
+
+Add per-epoch embedding-geometry diagnostics (on a fixed active-BSISO eval subset) so every run is judged on collapse, not on raw loss:
+- **Eigenvalue ratio** `λ₂/λ₁` of the 2-D embedding covariance. Healthy ≈ 0.3–1.0; **collapse if < 0.05** (line).
+- **Effective rank** (participation ratio) `(Σλ)²/Σλ²` ∈ [1, 2]. Healthy > 1.3; collapse → 1.
 - **Angular entropy** over a 36-bin angle histogram. Healthy → near `log 36`; collapse → low.
-- **Norm trajectory** (mean/std/max) — already tracked.
+- **Norm trajectory** (mean/std/max) — already tracked in Cell 6/7.
 
-First run = **diagnostic baseline**: reproduce the current config and record exactly which failure mode(s) fire and at which epoch. Everything downstream is measured against this.
+Two confirmatory diagnostics specific to this report:
+1. **Snapshot vs daily-average A/B:** run the *current* config on both `X_MJJAS_lee` (daily) and the snapshot backup; show the collapse fires on daily and not (or less) on snapshot — confirms the trigger.
+2. **Input-variance check + unit-variance renorm:** print per-channel std of daily vs snapshot `X`; test whether re-standardizing daily `X` to unit variance alone restores stability (cheapest possible fix).
 
-**Critical comparison rule:** batch size changes the InfoNCE `log(N)` floor, so runs are **never** compared by raw loss. They are ranked by (a) collapse metrics, (b) RMM-phase linear-probe accuracy, (c) ENSO displacement z-score.
+**Comparison rule:** batch size shifts the InfoNCE `log(N)` floor, so runs are **never** ranked by raw loss — rank by (a) collapse metrics, (b) BSISO-phase probe, (c) ENSO z, and (d) the full-2D-vs-angle-only gap (nb07c's existing "did the radius help?" test).
 
-### 3. Staged OFAT sequence (ordered by expected leverage)
+### 4. Staged OFAT sequence (ordered by expected leverage)
 
-Each stage changes exactly one factor, carries forward only the winner, and uses the same year-based val split and a fixed seed (seeds varied only in Stage 7).
+Each stage changes one factor, carries forward only the winner, same year-based val split, fixed seed (varied only in Stage 7).
 
-- **Stage 1 — Batch size {64, 128, 256}.** Highest-leverage knob for InfoNCE: more in-batch negatives → harder contrastive task → less room for trivial collapse. Watch GPU memory on T4 (256×2 views × small CNN is fine).
-- **Stage 2 — Temperature {0.07, 0.1, 0.2, 0.5}.** Standard contrastive τ is 0.07–0.2; 0.5 is soft. With raw dot product, τ trades off against norm scale, so judge jointly with the norm trajectory.
-- **Stage 3 — Structural anti-collapse (the real fix; compare 3 variants).** The scalar knobs alone may not cure a 2-D raw-dot collapse, so test:
-  - **(a) L2-normalize to the unit circle + a separate scalar amplitude head** that regresses RMM amplitude — recovers "radius encodes amplitude" *without* scale instability (decouples direction from magnitude).
-  - **(b) VICReg-style variance + covariance regularizer** added to InfoNCE (no normalization): a variance hinge keeps each dim's std ≥ target; a covariance term decorrelates the 2 dims — directly penalizes both line-collapse and point-collapse. (Conceptual cousin of the Barlow-Twins off-diagonal term from Session 36.)
-  - **(c) Variance term only** on the raw-dot embedding (lighter-weight (b)).
-- **Stage 4 — Weight decay {1e-4, 5e-4, 1e-3}.** Primary control on norm explosion; interacts with τ and the Stage-3 choice.
-- **Stage 5 — LR schedule (user's explicit request).** Replace cosine with **`ReduceLROnPlateau(monitor=val_loss, factor=0.5, patience=5, min_lr=1e-6)`** — drops LR when val loss stalls, which is when collapse typically onsets. Also sweep base LR {1e-3, 3e-4}. (Note: if Stage-3 picks a regularized loss, monitor total val loss including the reg terms.)
-- **Stage 6 — Early stopping.** `patience=10` on val loss, `min_delta=1e-3`, **restore best weights**. Raise the epoch ceiling to ~80 so early-stopping (not a fixed count) terminates training and a late-stage collapse can't overwrite a good mid-training embedding.
-- **Stage 7 — Combine + robustness.** Assemble the winning settings into one candidate recipe; run **3 seeds**; report mean ± std on phase probe, ENSO z, and the collapse metrics. Lock the recipe.
+- **Stage 0.5 — Input renorm (cheapest first).** Re-standardize daily `X` to unit per-channel variance. If Step 0 shows this alone restores rank>1.3 and stable norms, much of the rest becomes tuning rather than rescue.
+- **Stage 1 — Batch size {64, 128, 256}.** Highest-leverage InfoNCE knob: more in-batch negatives → harder task → less room for trivial collapse. T4 memory is fine (small 31×51 CNN).
+- **Stage 2 — Temperature {0.07, 0.1, 0.2, 0.5}.** Standard contrastive τ is 0.07–0.2; 0.5 is soft. With raw dot product τ trades off against norm scale — judge jointly with the norm trajectory.
+- **Stage 3 — Structural anti-collapse (the real fix; 3 variants).** Threads the L2 trade-off:
+  - **(a) L2-normalize to S¹ + a separate scalar amplitude head** regressing `bsiso_amplitude` — recovers "angle = phase, radius = amplitude" *without* scale instability (decouples direction from magnitude). Most faithful to nb07c's original intent.
+  - **(b) VICReg-style variance + covariance regularizer** on the raw (un-normalized) embedding: a variance hinge keeps each dim's std ≥ target; a covariance term decorrelates the 2 dims — directly penalizes line- and point-collapse. (Cousin of the Barlow-Twins off-diagonal term, Session 36.)
+  - **(c) Variance term only** — lighter-weight (b).
+- **Stage 4 — Weight decay {1e-4, 5e-4, 1e-3}.** Primary control on norm explosion; nb07c's own Cell 7/12 already suggests bumping to 1e-3 on explosion. Interacts with τ and the Stage-3 choice.
+- **Stage 5 — LR schedule (user's explicit request).** Replace cosine with **`ReduceLROnPlateau(monitor=val_loss, factor=0.5, patience=5, min_lr=1e-6)`** — drops LR when val loss stalls (collapse onset). Also sweep base LR {1e-3, 3e-4}. If Stage-3 adds reg terms, monitor the *total* val loss.
+- **Stage 6 — Early stopping.** `patience=10` on val loss, `min_delta=1e-3`, **restore best weights**; raise epoch ceiling to ~80 so a late-stage collapse can't overwrite a good mid-training embedding.
+- **Stage 7 — Combine + robustness.** Best settings → one recipe; **3 seeds**; report mean ± std on phase probe, ENSO z, and collapse metrics. Lock it.
 
-### 4. Pass / fail gate (applied at every stage and to the final recipe)
+### 5. Pass / fail gate (every stage and the final recipe)
 
-A configuration passes only if **all** hold:
-- effective rank > 1.3 **and** `λ₂/λ₁` > 0.2 (embedding is not a line);
+Passes only if **all** hold:
+- effective rank > 1.3 **and** `λ₂/λ₁` > 0.2 (not a line);
 - `max_norm` < 100, mean norm bounded (no explosion, no point-collapse);
-- RMM-phase probe ≥ 35 % (vs 12.5 % random);
-- ENSO displacement z ≥ 2;
+- BSISO-phase probe **> 33%** (must clear the L2-norm 1-D-circle ceiling; stretch target ≥ 62% toward the 64-D 67.7%);
+- ENSO displacement z ≥ 2.5 (L2-norm gave 2.59; 64-D gave 3.83);
 - val loss stabilizes (no late divergence).
 
-### 5. Implementation shape (when we build it)
+Decision branches mirror nb07c's existing auto-decision: **Greenlight** (phase ≥ 62% & z ≥ 3.0 → BSISO genuinely 2-D, use for nb08 SSL), **Partial** (beats 33% but below 62% → discuss vs dim-sweep), **Radius-didn't-help** (≈ angle-only → escalate to a dimension sweep nb07d {1,2,4,8,16,32,64}).
 
-- New notebook **`nb14c_mjo_sup_collapse_sweep.ipynb`**: wrap nb14's training in `run(config) -> metrics`, loop over the staged configs, emit a results table + a collapse-metric-vs-epoch figure per run. Keep nb14 as the canonical single-run; nb14c as the sweep harness.
-- Same fix transfers to BSISO `nb07c` once validated on MJO.
-- Re-validate the locked recipe on the **full 1979–2023 `X_MJO`** after the OLR download completes; collapse is a methodology issue independent of record length, so prototyping on the current shorter record is valid.
+### 6. Implementation shape (when we build it)
 
-### 6. Open questions (parked, not asked now)
+- New notebook **`07d_sup_2d_collapse_sweep.ipynb`**: wrap nb07c's training in `run(config) -> metrics`, loop the staged configs, emit a results table + a collapse-metric-vs-epoch figure per run. Keep nb07c as the canonical single-run; 07d as the sweep harness. Reuse nb07c's existing radius-diagnostics and full-2D-vs-angle-only probe verbatim.
+- Once the BSISO recipe is locked, the same fix transfers to MJO `nb14` (note nb14 is 1-D-longitude input, so re-validate there).
 
-1. Do we keep the "radius encodes amplitude" goal (favor Stage-3a) or accept a normalized embedding with amplitude as a separate output?
-2. Embedding dim: stay at 2 for interpretability/plotting, or allow 3–4 to give the contrastive loss more room (2-D is the most collapse-prone case)?
-3. Should the sweep optimize for ENSO z or for phase-probe accuracy when the two trade off?
+### 7. Open questions (parked, not asked now)
+
+1. Keep the "radius encodes amplitude" goal (favor Stage-3a) or accept a normalized embedding with amplitude as a separate output?
+2. Embedding dim: stay at 2 for interpretability/plotting, or allow 3–4 (2-D is the most collapse-prone case)?
+3. If Step 0 shows daily-average is the sole trigger and unit-variance renorm fixes it, do we still run the full sweep, or just adopt renorm + keep the snapshot-era recipe?
+4. When phase-probe and ENSO-z trade off, which does the sweep optimize?
 
 ---
 
