@@ -4555,4 +4555,21 @@ Decision branches mirror nb07c's existing auto-decision: **Greenlight** (phase �
 
 ---
 
+## Session 38 — nb07d Built: BSISO Collapse-Fix Sweep Harness (2026-06-11)
+
+Implemented the Session-37 plan as [`07d_sup_2d_collapse_sweep.ipynb`](../notebooks/extension_2d/07d_sup_2d_collapse_sweep.ipynb). User greenlit the cheap-fix-first approach (open-question #3) and asked about retaining snapshot data.
+
+**Snapshot decision:** keep only the **raw** `_snapshot12z_backup/` (audit trail + optional A/B source); **daily-average is canonical** going forward — no maintained snapshot-processed arrays. The collapse fix does not depend on snapshot data (input-variance check + unit-variance renorm diagnose the trigger from daily data alone). nb07d auto-detects a snapshot processed array and runs the A/B only if present.
+
+**nb07d structure:**
+- **Collapse instrumentation:** per-epoch `λ₂/λ₁`, effective rank, angular entropy, norm max; `is_collapsed()` pass-gate (eff_rank > 1.3 ∧ eig_ratio > 0.2 ∧ norm_max < 100).
+- **`run(config, X_data)` harness:** 3 loss variants — `raw` (nb07c baseline), `vicreg` (InfoNCE + variance hinge + covariance penalty on raw embedding), `l2_amp` (cosine InfoNCE on L2-normalized z + separate scalar amplitude-regression head); cosine **or** `ReduceLROnPlateau(factor=0.5, patience=5)`; optional early stopping with best-weight restore; returns phase-probe %, ENSO z, collapse metrics.
+- **Step 0 (Cell 6):** baseline collapse reproduction on raw daily X + unit-variance-renorm cheap-fix test, with side-by-side trajectory plot and an explicit `cheap_fix_works` verdict.
+- **Staged sweep (Cells 7–8):** batch {64,128,256} → τ {0.07,0.1,0.2,0.5} → variant → wd {1e-4,5e-4,1e-3} → sched×lr → early-stop + 3-seed final recipe. Results persist to `sweep_results.json` after every run so stages run incrementally.
+- **Outputs:** `results/sup2d_collapse_sweep/{sweep_results.json, sweep_table.csv, step0_trajectories.png}`, `checkpoints/encoder_sup2d_fixed_final.pth` + `sup2d_fixed_config.json`.
+
+BSISO data is already daily-migrated, so this runs independently of the in-progress MJO OLR download. Awaiting Step-0 output to decide whether renorm alone suffices or the full sweep is needed.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
