@@ -4572,4 +4572,26 @@ BSISO data is already daily-migrated, so this runs independently of the in-progr
 
 ---
 
+## Session 39 — nb07d Results: Collapse Solved (τ was the cause); 2-D Plateaus at ~50% (2026-06-12)
+
+Ran the full nb07d sweep (22 configs, on CPU — see runtime note). **Outcome: the collapse is fixed.**
+
+**Root cause = temperature, not input variance.** Every τ=0.07 run is non-collapsed (eff_rank 1.6–1.9, eig 0.3–0.67); every τ ≥ 0.1 run collapses (eff_rank 1.00, eig ≈ 0). The original nb07c collapse was simply τ=0.5 being far too soft for a 2-D raw-dot embedding. The unit-variance renorm was a no-op (Lee preprocessing already standardizes — answers the Session-38 input-variance hypothesis: **not** the trigger).
+
+**Best stable recipe — `s4_wd0.001`:** variant=vicreg, batch=256, τ=0.07, weight_decay=1e-3, cosine, 50 ep → **phase 50.1%, ENSO z 6.56, eff_rank 1.93**. (raw at the same settings: 46.5% / z 8.38. vicreg buys +3 pp phase; raw buys higher z.)
+
+**Early stopping on val loss HURT.** The 3-seed plateau+ES "final" scored 42.2% ± 3.7% because ES fired at ep 20/48/20 — val InfoNCE loss flattens *before* the embedding finishes spreading, while the downstream phase probe keeps improving. **Lesson: train these contrastive runs to full epochs; do not early-stop on val loss.** So the adopted recipe is the cosine / no-ES / full-50-ep version, not the plateau+ES one.
+
+**Phase↔z trade-off:** lower lr (3e-4) raises z (9.8–11.2) but drops phase to ~37%. The wd1e-3 cosine config is the best phase operating point while keeping z ≈ 6.6 (still ≫ 64-D's 3.83).
+
+**Verdict: PARTIAL, and consistent with NSV.** 50% beats the 33% 1-D-circle ceiling (+17 pp) but is well below the 64-D 67.7%. This matches the BSISO NSV finding **d̂ = 4** (Session 32): a 2-D embedding structurally cannot hold a 4-D state, so it should plateau here. ENSO modulation is strong throughout (z 6.5–11.2).
+
+**Recommended next step:** dimension sweep **nb07e** over embedding dim {1, 2, 4, 8, 16, 32, 64} with the locked recipe (vicreg/bs256/τ0.07/wd1e-3/cosine/full-epochs). Hypothesis: phase climbs steeply 2→4 (toward the 64-D 67.7%) and saturates near d=4, giving an end-to-end supervised confirmation of the NSV intrinsic dimension. Collapse metrics generalize (use full-covariance eff_rank for d>2).
+
+**Runtime note:** sweep ran on **CPU** (the `pin_memory … no accelerator` warning) — switch the Colab runtime to T4 GPU for the dim sweep. The per-item pandas `.loc` sampler is also a device-independent bottleneck worth vectorizing to numpy before nb07e.
+
+**Artifacts:** `checkpoints/encoder_sup2d_fixed_final.pth` + `sup2d_fixed_config.json` (note: these are the plateau+ES 3-seed-42 weights — regenerate from the cosine/no-ES recipe when locking). `results/sup2d_collapse_sweep/{sweep_table.csv, sweep_results.json, step0_trajectories.png}`.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
