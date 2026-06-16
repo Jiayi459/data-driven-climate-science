@@ -4653,6 +4653,26 @@ Second nb07d run (BSISO sup-2D, daily-mean `X_MJJAS_lee`). Confirms and sharpens
 
 **Action items:** (1) fix nb07d sweep order (τ before batch) and regenerate the locked checkpoint from the cosine/no-ES recipe (current saved checkpoint is the collapsed plateau+ES one); (2) update nb07e's hardcoded `LOCKED` recipe to bs64 (was bs256) before the dimension sweep.
 
+## Session 42 — nb07e Dimension Sweep: Knee at d=4 (supports NSV d̂=4) (2026-06-12)
+
+Ran nb07e (BSISO sup-2D dim sweep, locked recipe vicreg/bs64/τ0.07/wd1e-4/cosine/50ep) over embedding dim {1,2,4,8,16,32,64}; 3-seed robustness at d=2 and d=4.
+
+**Auto-verdict said "knee=2" — this is a single-seed artifact and is corrected here.** The Cell-8 knee was computed from the seed-42 curve, where d=2 happened to hit 49.2%. The **3-seed robustness** tells the real story:
+
+| dim | phase (3-seed) | eff_rank | per-seed | stable |
+|---|---|---|---|---|
+| 2 | **39.5% ± 8.6** | 1.16–1.93 | 49.2 / 32.5 / 36.8 | NO (2/3 seeds collapse to eff_rank ~1.2) |
+| 4 | **51.1% ± 1.4** | ~2.40 | 51.6 / 49.5 / 52.1 | YES |
+| 64 (ceiling) | 54.1% | — | — | — |
+
+**Corrected conclusion: the robust knee is at d=4.** By the 3-seed mean, d=2 (39.5%) is *below* the 48.7% threshold (90% of the 54.1% ceiling); d=4 (51.1%) clears it. Phase curve = 39.5%→51.1%→54.1%: big jump 2→4 (+11.6), marginal 4→64 (+3). Textbook elbow at **d=4**; d=4 reaches **94% of the 64-D ceiling**.
+
+**Interpretation:** independent end-to-end *supervised* confirmation of the BSISO NSV intrinsic dimension **d̂=4** (Session 32). The 2-D plateau (~50%, Sessions 39/41) was a genuine dimensionality limit, not a training failure. BSISO needs ~4 dims for a **stable** representation; 2-D sits on the edge of collapse.
+
+**Nuances (honest):** (1) eff_rank ≈ 2.4 at d=4 — the model spreads variance over only ~2.4 of the 4 dims, so the *used* dimensionality is ~2.4–3; describe as "≈3–4," broadly consistent with d̂=4. (2) The 3-seed robustness was essential — the single-seed curve would have falsely concluded "2-D is enough" (the lucky d=2 seed). ENSO z also higher at d=4 (6.50 vs 5.45).
+
+**Awaiting:** `dim_sweep_curves.png` + `dim_sweep_table.csv` (full single-seed curve d=8/16/32) to confirm flatness beyond d=4 and lock the elbow-at-4 claim.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
