@@ -4621,6 +4621,27 @@ Ran the full nb07d sweep (22 configs, on CPU — see runtime note). **Outcome: t
 
 **Methodological lesson (reusable):** for a near-degenerate EOF pair, never judge basis agreement by per-component correlation — it's rotation-sensitive. Use Procrustes + canonical correlation. (Same caution applies to the BSISO RMM-analog and any 2-D EOF comparison.)
 
+## Session 41 — nb07d 2nd Run: Collapse Mechanism Identified + Sweep-Order Flaw (2026-06-12)
+
+Second nb07d run (BSISO sup-2D, daily-mean `X_MJJAS_lee`). Confirms and sharpens Session 39.
+
+**Reason for the collapse (definitive answer to the user's question):** *not* the daily-mean data — it's **soft (high-τ) raw-dot-product InfoNCE on a non-L2-normalized 2-D embedding permitting a lazy 1-D minimizer.**
+- Evidence it's not the input: `step0_baseline` (raw X) and `step0_renorm` (unit-variance X) collapse identically (~31%) in both runs; renorm is a no-op (Lee preprocessing already standardizes).
+- Evidence it's temperature: sharp phase transition between τ=0.2 (eff_rank 1.01, collapsed) and τ=0.1 (eff_rank 1.99, phase 54.5%). At τ=0.07 eff_rank=2.00, eig=0.976 (isotropic 2-D).
+- Mechanism: with no normalization the net controls direction *and* magnitude, so it can line all points on one axis and encode class by signed magnitude (1-D, eff_rank=1). A soft (large-τ) softmax tolerates the crowding 1-D forces on 8 phases × 3 ENSO; a sharp (small-τ) softmax heavily penalizes every too-close negative, which 1-D cannot avoid → the net must spread into 2-D. So the collapse is latent at τ=0.5 regardless of input; nb07c "always" collapsed and the daily-mean migration just surfaced it (red herring).
+
+**Run-to-run instability — sweep-order flaw:** Stage 1 sweeps batch size *at τ=0.5 where everything collapses*, so the winner is chosen from ~31% noise. Run 1 picked bs256; run 2 picked bs64. This cascades into different final recipes. **Fix: sweep τ FIRST (the real unlock), then batch size at the good τ.** Batch size sets a real phase↔z trade-off:
+- bs64 + τ0.07: phase **55.6%**, eff_rank 2.00, z **2.05** (fills 2-D disk; ENSO axis flattened)
+- bs256 + τ0.07 (run 1): phase 46.5%, eff_rank 1.77, z **8.38**
+
+**Stage 3 variants (bs64, τ0.07, cosine):** raw 56.9% / z2.40; **vicreg 52.0% / z6.16**; l2_amp 33.5% (L2-norm reintroduces the 1-D-circle ceiling, as before).
+
+**Early stopping is catastrophic here:** the plateau+ES 3-seed final collapsed (32.1%, eff_rank 1.03) — ES fired at ep 12/18/21, before the 2-D spreading (which happens late and isn't reflected in val loss). **Rule reaffirmed: no early-stop; train full cosine epochs.**
+
+**Recommended locked recipe:** **vicreg, bs64, τ0.07, wd1e-4, cosine, 50 ep, NO early-stop** → 52% phase + z6.16 (best phase-AND-ENSO balance; raw gives 56.9% but z≈2). Beats the 33% ceiling; collapse solved.
+
+**Action items:** (1) fix nb07d sweep order (τ before batch) and regenerate the locked checkpoint from the cosine/no-ES recipe (current saved checkpoint is the collapsed plateau+ES one); (2) update nb07e's hardcoded `LOCKED` recipe to bs64 (was bs256) before the dimension sweep.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
