@@ -4611,7 +4611,15 @@ Ran the full nb07d sweep (22 configs, on CPU — see runtime note). **Outcome: t
 
 **Rebase note:** the Colab run pushed an executed nb24 (b4852c8) that conflicted with my first Fig H commit; aborted, took the executed version, re-applied Cell 2b + Fig H on top.
 
-**Awaiting:** the Cell-2b printout (rotation angle + canonical corr + rotation-aligned r) and Fig H (phase exact/±1, ENSO-stratified r). If canonical corr ≳ 0.9 → adopt `pcA_rot` as the canonical `mjo_rmm_own_pcs.npy` (update the save cell) and the index is validated against BoM. If not → real residual disagreement to chase in preprocessing / ERA5-vs-NOAA source.
+**RESULT (confirmed — rotation hypothesis correct):**
+- Rotation-aligned per-component corr: **RMM1 = 0.947, RMM2 = 0.971** (up from 0.785/0.793).
+- Amplitude r = **0.909**; phase **exact 83%, within-±1 = 100%** (our index is never off BoM by more than one octant).
+- **Canonical correlations = 0.97, 0.95** → the two 2-D MJO subspaces essentially coincide; the raw 0.79 was purely a near-degenerate-EOF basis rotation.
+- **ENSO-stratified (no bias):** El Niño 0.936/0.955, Neutral 0.955/0.975, La Niña 0.949/0.978 — uniformly high across ENSO states, so downstream ENSO-modulation analyses are not confounded by index quality varying with ENSO.
+
+**Verdict:** our daily-mean ERA5 RMM **reproduces the official BoM index** (r≈0.95, canonical 0.95–0.97). The daily-average migration and `X_MJO` are validated. **Adopted `pcA_rot` as the canonical `mjo_rmm_own_pcs.npy`** (save cell updated; also keeps `mjo_rmm_own_pcs_unrotated.npy` and writes rotation + canonical-corr into `mjo_rmm_metadata.json`).
+
+**Methodological lesson (reusable):** for a near-degenerate EOF pair, never judge basis agreement by per-component correlation — it's rotation-sensitive. Use Procrustes + canonical correlation. (Same caution applies to the BSISO RMM-analog and any 2-D EOF comparison.)
 
 ---
 
