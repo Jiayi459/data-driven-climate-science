@@ -4461,6 +4461,17 @@ These are flagged here so they don't get lost, not asked now:
 - No code written. No new notebooks pushed. No questions asked of the user — they explicitly said *"don't let me make choice only for this conversation"*.
 - This session is a thinking-out-loud record so that when implementation starts (probably after the OLR_MJO daily-mean refresh, per Session 35), the design space is already mapped out.
 
+### Update (2026-06-12) — Open questions RESOLVED (user decisions)
+
+1. **τ-grading (Q1):** the **off-diagonal (redundancy) term is ALSO τ-graded**, not just the diagonal — both terms get a τ-dependent weight. Loss becomes
+   `L(τ) = λ_inv(τ)·Σ_i (1 − C_ii(τ))² + λ_off(τ)·Σ_{i≠j} C_ij(τ)²`, with both `λ_inv(τ)` and `λ_off(τ)` decreasing as τ goes 1→5 d (generalizes "Reading C").
+2. **Input (Q2):** MJO **daily-mean `X_MJO`, bandpass 20–90 d** (the MJO intraseasonal field).
+3. **Encoder (Q3):** warm-start from the NSV Stage-1 encoder. ⚠️ **Flag:** user said "nb18c", but nb18c is the **BSISO** Stage-1 encoder (input (3,31,51)); Q2 sets the input to **MJO** bp20-90 (shape (3,1,180)) — shapes are incompatible. The MJO analog is the **nb21 / nb23 MJO Stage-1 encoder**. Assume the MJO Stage-1 encoder (nb23 refined / nb21 Stage-1 weights) unless the user means otherwise — confirm at implementation.
+4. **Projector (Q4):** "appropriate for our case" → a **small** projector sized to our low dim (D≈7), e.g. `64 → 128 → 64 → 7`; NOT the paper's 8192.
+5. **Placement (Q5):** a **new notebook, after the NSV chapter** (i.e., after nb23) — tentatively **nb26**.
+
+Status: decisions logged; implementation deferred until after the current BSISO sup-2D / dim-sweep thread. The τ ∈ {1..5} pairs come from the MJO bp20-90 field at those day-lags; both Barlow terms weighted by the decaying λ(τ) schedule (λ(1)=1.0 → λ(5)=0.5 baseline, now applied to both diagonal and off-diagonal).
+
 ---
 
 ## Session 37 — BSISO Supervised-2D (nb07c) Training-Collapse Fix on Daily-Average Data: Staged Experiment Plan (2026-06-11)
