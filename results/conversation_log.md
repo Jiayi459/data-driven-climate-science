@@ -4594,4 +4594,25 @@ Ran the full nb07d sweep (22 configs, on CPU — see runtime note). **Outcome: t
 
 ---
 
+## Session 40 — nb24 Full-Record Results + Rotation-Aware Alignment + Fig H (2026-06-12)
+
+**MJO OLR daily download finished** → nb13 + nb24 reran on the **full 1979–2023 record (N=16,436)**. Truncation (Sessions 35-37) resolved.
+
+**Executed results (from the Colab-run nb24, commit b4852c8):**
+- **Variance spectrum:** PC1 = **13.10%**, PC2 = **12.69%** vs WH04 12.8/12.2 — near-exact; leading pair clean above PC3 (5.9%). (PC3≈PC4 = 5.9/5.5 is a second near-degenerate pair, not the MJO mode.)
+- **Per-component corr with BoM (Pipeline A):** RMM1 = **0.785**, RMM2 = **0.793** — *down* from 0.918/0.939 on the 8-yr truncated subset. Pipeline B (1979–2001 calibration) lower still: 0.678/0.708 (tripped the <0.7 warning). The two pipelines even disagree on flip-vs-swap alignment.
+- lag-corr peak +9 d; zoom years auto = 1987 (El Niño), 1999 (La Niña).
+
+**Diagnosis — it's a basis rotation, not a real disagreement.** PC1≈PC2 (13.10 vs 12.69%) ⇒ our EOF pair is near-degenerate, so our (RMM1,RMM2) basis is only defined up to a **rotation** within the 2-D MJO plane. Per-component correlation is rotation-sensitive: a rotated-but-identical plane shows low r while the *subspace* is the same. The flip/swap aligner (dihedral group only) can't undo a continuous rotation — hence ~0.79, and the A-vs-B alignment inconsistency. The user read Fig F (monthly-smoothed) as "quite similar"; the daily per-component r is 0.79, and the right question is subspace agreement, not component-wise r.
+
+**Design update implemented (nb24):**
+- **Cell 2b — rotation-aware alignment:** orthogonal Procrustes `R` minimizing ‖pcA_std·R − bom‖ → `pcA_rot`; reports rotation angle, per-component corr before/after, and **canonical correlations** (principal-angle cosines = rotation-free subspace match). Prediction: canonical corr ≳ 0.9 and rotation-aligned per-component r jumps from 0.79 toward 0.9, confirming our MJO plane = BoM's.
+- **Cell 9b — Fig H quantitative agreement** (on rotation-aligned `pcA_rot`): hexbin ours-vs-BoM RMM1/RMM2 (r, slope, RMSE σ), amplitude r, 8×8 phase confusion matrix (exact + within-±1), and ENSO-stratified corr. Saves `fig24H_agreement.png` + `fig24H_agreement.json`.
+
+**Rebase note:** the Colab run pushed an executed nb24 (b4852c8) that conflicted with my first Fig H commit; aborted, took the executed version, re-applied Cell 2b + Fig H on top.
+
+**Awaiting:** the Cell-2b printout (rotation angle + canonical corr + rotation-aligned r) and Fig H (phase exact/±1, ENSO-stratified r). If canonical corr ≳ 0.9 → adopt `pcA_rot` as the canonical `mjo_rmm_own_pcs.npy` (update the save cell) and the index is validated against BoM. If not → real residual disagreement to chase in preprocessing / ERA5-vs-NOAA source.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
