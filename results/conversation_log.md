@@ -4692,6 +4692,23 @@ Full seed-42 curve (dim_sweep_table.csv):
 - **Verdict: consistent with a ~4-D *state* (phase 2 + amplitude/ENSO ~2, matching the Session-32 NSV decomposition) but NOT a sharp supervised confirmation of d̂=4.** The phase probe saturates near 2 (it only tests phase); ENSO needs more dims. d=4 is a *pragmatic* operating point (phase ≈92% of peak, stable, z=6.3, parsimonious), not a measured intrinsic dimension.
 - **Caveat on the figure:** the dim-sweep's own d=64 = 54.1%, below the historical 64-D 67.7% baseline (green line) — different recipe (vicreg raw-dot vs the original 64-D model), so that reference line is not this sweep's ceiling (internal peak = d=32, 56.6%).
 
+## Session 43 — nb26 Built: MJO Barlow Twins (τ-graded, D=7) (2026-06-12)
+
+Implemented the Session-36 Barlow Twins design as [`26_mjo_barlow_twins.ipynb`](../notebooks/mjo/26_mjo_barlow_twins.ipynb), per the resolved decisions.
+
+**Architecture:** EncoderMJO (1-D conv, identical to nb21 so the Stage-1 checkpoint loads) → 64-D, warm-started from `MJO/nsv/checkpoints_lag10/encoder_stage1_best.pth`; Projector `64→128→64→7` (D=7 = MJO NSV d̂). Loss on the 7×7 cross-correlation:
+`L(τ) = λ_inv(τ)·Σ(1−C_ii)² + λ_off(τ)·Σ_{i≠j}C_ij²`, with `λ_inv(τ)=sched(τ)`, `λ_off(τ)=LAMBDA_OFF_BASE·sched(τ)`, `sched(τ)=1.0−0.125(τ−1)` (1.0→0.5 over τ∈{1..5}). Both terms τ-graded (decision #1).
+
+**Encoder decision resolved:** the Session-36 "nb18c" flag is settled — nb18c is BSISO 2-D (incompatible shape); nb26 warm-starts the **MJO Stage-1 encoder (nb21)**, confirmed by reading nb21's `EncoderMJO` + input contract.
+
+**Pairs:** per-τ same-split `(X_t, X_{t+τ})` for τ∈{1,2,3,4,5}; one train loader per τ, each batch uniform-τ so the 7×7 C is well-defined; epoch interleaves one batch per τ.
+
+**Diagnostics/eval:** per-τ on/off-diagonal trajectories (expect on-diagonal to *rise* with τ = invariance relaxing as the mode drifts); extracts 7-D projector embedding (primary) + 64-D encoder feature; linear probes (RMM phase, ENSO bal) + ENSO displacement z on the 7-D (refs: nb14 sup z=12.21, nb23 NSV v-space z=20.88).
+
+**⚠️ Prerequisite (blocking a trustworthy run):** both the bp20-90 input (`X_MJO_bp20_90.npy`) and the Stage-1 encoder come from the MJO NSV pipeline (nb21), whose full-daily rerun was **deferred** (Session 35). Refresh on full 1979–2023 daily data before trusting nb26 numbers; Cell 2 mtime-warns if the input is stale, Cell 4 prints the encoder's date. Also: d̂=7 was measured on the earlier data; re-confirm via nb22 on full data if convenient (D is configurable).
+
+**Open tuning:** `LAMBDA_OFF_BASE` default 5e-3 (paper) may be too small for D=7 (42 off-diagonal vs 7 diagonal terms); flagged to raise toward ~0.05–0.1 if dims stay correlated. Compile-validated; not yet executed.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
