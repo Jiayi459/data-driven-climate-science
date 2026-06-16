@@ -4673,6 +4673,25 @@ Ran nb07e (BSISO sup-2D dim sweep, locked recipe vicreg/bs64/τ0.07/wd1e-4/cosin
 
 **Awaiting:** `dim_sweep_curves.png` + `dim_sweep_table.csv` (full single-seed curve d=8/16/32) to confirm flatness beyond d=4 and lock the elbow-at-4 claim.
 
+### Correction (2026-06-12, full curve received) — NO sharp elbow at d=4
+
+Full seed-42 curve (dim_sweep_table.csv):
+
+| dim | 1 | 2 | 4 | 8 | 16 | 32 | 64 |
+|---|---|---|---|---|---|---|---|
+| phase% | 30.4 | 48.7 | 51.9 | 54.8 | 55.6 | **56.6** | 54.1 |
+| z | 0.84 | 5.81 | 6.33 | 8.78 | 9.19 | 12.28 | **17.21** |
+| eff_rank | 1.00 | 1.93 | 2.40 | 2.76 | 3.97 | 5.41 | 6.32 |
+
+**The "elbow at d=4 / supports d̂=4" claim above is RETRACTED — it was over-read from partial 3-seed data.** The full curve shows: steep rise d1→d2 (+18 pp), then a slow concave climb to a broad phase peak at **d=32 (56.6%)**, dropping at d=64. No sharp saturation at 4.
+
+**Corrected interpretation:**
+- **BSISO *phase* is essentially 2-D** — d=2 gets 48.7% ≈ 86% of the achievable phase signal. Physically expected: phase is an angle (2-D). Extra dims give diminishing phase returns.
+- **ENSO modulation is high-dimensional** — z climbs monotonically 5.8→17.2 across d=2→64, no saturation (permutation null controls for dimensional inflation, so it's real). ENSO structure is distributed across many dims.
+- **eff_rank grows continuously** (2.4@d4 → 6.3@d64); model never plateaus at ~4.
+- **Verdict: consistent with a ~4-D *state* (phase 2 + amplitude/ENSO ~2, matching the Session-32 NSV decomposition) but NOT a sharp supervised confirmation of d̂=4.** The phase probe saturates near 2 (it only tests phase); ENSO needs more dims. d=4 is a *pragmatic* operating point (phase ≈92% of peak, stable, z=6.3, parsimonious), not a measured intrinsic dimension.
+- **Caveat on the figure:** the dim-sweep's own d=64 = 54.1%, below the historical 64-D 67.7% baseline (green line) — different recipe (vicreg raw-dot vs the original 64-D model), so that reference line is not this sweep's ceiling (internal peak = d=32, 56.6%).
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
