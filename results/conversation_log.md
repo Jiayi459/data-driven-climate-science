@@ -4729,6 +4729,29 @@ First execution of nb26 (τ-graded MJO Barlow Twins, D=7, warm-start nb21).
 
 **Caveats / next options:** (1) τ-grading too gentle — steepen decay (λ(5)≈0.05) or use τ∈{1,2} so invariance doesn't kill MJO phase; then z7 could hold phase AND show ENSO displacement (the real target). (2) Prereq still open: bp20-90 input + nb21 encoder should be refreshed on full daily data. (3) `LAMBDA_OFF_BASE`=5e-3 may be small for D=7.
 
+## Session 45 — nb26 Steep-τ Run: BT Cannot Capture MJO Phase (definitive) + Embedding Viz (2026-06-17)
+
+Re-ran nb26 with the **steep τ-decay** (confirmed: `exp, 1.0→0.05`, λ = {1:1.0, 2:0.47, 3:0.22, 4:0.11, 5:0.05}).
+
+**Result — steep decay did NOT rescue phase:**
+| | run 1 (1.0→0.5) | run 2 (steep 1.0→0.05) |
+|---|---|---|
+| 7-D projector phase | 11.8% | **12.2% (= random)** |
+| 7-D ENSO z | 34.68 | 33.99 |
+| 64-D encoder phase | 40.2% | **31.8%** |
+
+**Definitive conclusion: Barlow Twins (invariance-SSL) on temporal-lag views structurally cannot represent the cyclic MJO phase.** The invariance loss drives C_ii→1 (feature unchanged across views), but the MJO phase is exactly what changes between t and t+τ — so any invariance objective suppresses it by construction. τ-decay (the obvious fix) failed, and BT fine-tuning even **eroded** the warm-start encoder's phase (40.2%→31.8%). So z≈34 = "embedding encodes ENSO," not "ENSO modulates MJO phase."
+
+**Embedding visualization (Cell 9, PCA + t-SNE of z7):** a "starfish" — dense **low-amplitude core** + **radial high-amplitude arms** (radial = MJO amplitude), arms **separated by ENSO** (Neutral / El Niño / La Niña in different sectors). Phase colors mixed, **no loop**. Confirms organization by amplitude + ENSO, not phase.
+
+**Modulation dimensionality (3rd confirmation):** PR = 2.03 (z7), 2.13 (f64); sv% 66/23/8 and 65/17/13. **ENSO modulation robustly ~2-D.**
+
+**Reframe (positive):** nb26 = label-free recovery of the **~2-D slow ENSO/amplitude envelope** of the MJO. Clean complementarity established:
+- invariance-SSL (Barlow Twins, temporal views) → slow envelope (ENSO + amplitude, ~2-D), no phase;
+- contrastive/prediction SSL (InfoNCE nb15, NSV lag-10 f64) → fast phase cycle (f64 holds phase).
+
+**Decision/next:** stop tuning BT for phase (structural dead-end). Either (1) freeze this framing and pair BT-envelope with nb15/NSV-phase, or (2) switch BT to **augmentation views** (two augmentations of the same day) so phase is shared and invariance no longer fights it — a different experiment that abandons τ-grading. Recommended: (1).
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
