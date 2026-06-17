@@ -4709,6 +4709,26 @@ Implemented the Session-36 Barlow Twins design as [`26_mjo_barlow_twins.ipynb`](
 
 **Open tuning:** `LAMBDA_OFF_BASE` default 5e-3 (paper) may be too small for D=7 (42 off-diagonal vs 7 diagonal terms); flagged to raise toward ~0.05–0.1 if dims stay correlated. Compile-validated; not yet executed.
 
+## Session 44 — nb26 Barlow Twins: First Run + ENSO-Modulation is ~2-D (2026-06-17)
+
+First execution of nb26 (τ-graded MJO Barlow Twins, D=7, warm-start nb21).
+
+**Training (converged):** total loss → ~0.005; C → identity (on- and off-diagonal → 0 for all τ). Early-training on-diagonal is τ-ordered (τ=5 ≈ 0.06 high → τ=1 ≈ 0.001) — the slow-evolution signal — but **washes out by epoch 100** (all τ fully invariant; λ(5)=0.5 too strong to leave a residual).
+
+**Probe results:**
+- 7-D projector: RMM phase **11.8% (= random)**, ENSO bal 32.9% (= random), **ENSO z = 34.68**.
+- 64-D encoder: RMM phase 40.2%, ENSO bal 38.0%.
+
+**Key interpretation — BT-on-time-lags is a SLOW-FEATURE extractor.** Enforcing C_ii→1 over τ=1–5 d removes anything that changes on that timescale — i.e. the **MJO phase** (it propagates) — and keeps the slow invariant background, dominated by **ENSO**. So the 7-D projector encodes ENSO and discards the MJO cycle (phase = random). Therefore **z=34.68 means "the embedding encodes ENSO," NOT "ENSO modulates the MJO"** — a subtly different (and less useful) claim. f64 keeps phase (40%) only because it's the warm-started NSV predictor; the projector strips it.
+
+**Modulation dimensionality (Cell 8 — answers "how many dims, what % each"):** SVD of the per-phase EN−LN displacement matrix M(8×D):
+- z7: modulation sv% = 67.5 / 24.1 / 4.8 / … → **participation ratio 1.94**
+- f64: modulation sv% = 68.2 / 16.1 / 10.2 / … → **participation ratio 1.99**
+- **The ENSO modulation is effectively ~2-D**, one dominant axis (~68%) + secondary (~16–24%), robust across both a 7-D and 64-D representation. (z7 embedding PCA var is ~uniform 9–21% = BT whitening confirmed; f64 PCA is structured, PC1=53.6%.)
+- Headline uses **f64** (retains MJO structure); z7's modulation is of the slow background. Physical read: of the full ~7-D MJO state, the ENSO-modulated *subspace* is ~2-D (dominant mode ~ east-west convection / Maritime-Continent-barrier shift).
+
+**Caveats / next options:** (1) τ-grading too gentle — steepen decay (λ(5)≈0.05) or use τ∈{1,2} so invariance doesn't kill MJO phase; then z7 could hold phase AND show ENSO displacement (the real target). (2) Prereq still open: bp20-90 input + nb21 encoder should be refreshed on full daily data. (3) `LAMBDA_OFF_BASE`=5e-3 may be small for D=7.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
