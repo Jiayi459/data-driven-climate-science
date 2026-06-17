@@ -4752,6 +4752,20 @@ Re-ran nb26 with the **steep τ-decay** (confirmed: `exp, 1.0→0.05`, λ = {1:1
 
 **Decision/next:** stop tuning BT for phase (structural dead-end). Either (1) freeze this framing and pair BT-envelope with nb15/NSV-phase, or (2) switch BT to **augmentation views** (two augmentations of the same day) so phase is shared and invariance no longer fights it — a different experiment that abandons τ-grading. Recommended: (1).
 
+## Session 46 — nb26 at D=3: cleaner ENSO envelope, phase still random (2026-06-17)
+
+Tried Barlow Twins with PROJ_DIM=3 (outputs → `MJO/barlow/D3/`). Confirms the Session-45 conclusion and gives a sharper figure.
+
+**Results (D=3):**
+- 7-D→3-D projector: RMM phase **12.5% (= random)**, ENSO bal 36.0%, **ENSO z 27.51** (down from 33.99 at D=7 — lower D = less dimensional inflation of centroid distance = a more honest z; cf. nb07e z-grows-with-dim).
+- 64-D encoder: RMM phase **28.2%** (was 40.2% run-1 → 31.8% steep-D7 → 28.2% now — BT fine-tuning progressively **erodes** the warm-start phase).
+- ENSO-modulation sv% = 69.6 / 30.0 / 0.4 → **PR 1.74**; per-dim effect size = 0.50 / 0.06 / 0.06 → **one dominant ENSO axis + a weak second**. Consistent with the ~2-D modulation, sharper at D=3.
+- Embedding PCA var% = 47.6/30.1/22.3 (whitening imperfect at D=3 because λ_off=5e-3 is weak; dominant ENSO/amplitude axis keeps more variance).
+
+**Best figure yet:** the D=3 **PCA-2D is a three-armed star** whose arms are the three ENSO categories (Neutral / La Niña / El Niño), with amplitude as the radial extent — a clean label-free layout of the ENSO states as 3 directions. Still **no phase loop** (phase random).
+
+**Takeaways:** (1) phase failure is dimension-independent (structural, invariance-SSL) — settled 3×; (2) the ENSO/amplitude envelope is the robust signal, ~2-D, and at D=3 collapses to ~1 dominant ENSO axis; (3) BT fine-tuning keeps degrading the encoder's phase → **freeze the encoder (train projector only) if f64 is to stay a phase representation** for the three-way comparison. Fixed the stale "7-D/z7" figure title to use PROJ_DIM.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
