@@ -3749,7 +3749,7 @@ The 4 SIREN bottleneck axes do **not** rotate onto physically meaningful directi
 2. **No seasonal-cycle confound.** Day-of-year correlations all in [−0.11, +0.09] across the four dims. Compare with MJO lat16 (Session 28) where month F = 2,038 and the SSL embedding became a calendar-month detector. The lp25 + lag-10 preprocessing successfully kept the seasonal envelope out of the latent.
 3. **The 4-D state space is dynamical, not just descriptive.** Stage 4 MLP beats v-persistence by 22.2%. The four axes carry not just static state information but information sufficient to predict 10 days ahead.
 
-### 5. Caveats and what we don't yet know
+### 5. Caveats ad what we don't yet know
 
 - **The four axes are not separately interpretable.** Without rotation, we can't say "v0 is the ENSO axis". We can only say "v0 has the highest ENSO loading among the four, and the four together span a space that contains an ENSO direction".
 - **The amplitude correlation in v2 (−0.41) is interesting but small in absolute terms.** It hints that amplitude is one of the four state variables, but the SIREN doesn't fully isolate it.
@@ -4765,6 +4765,38 @@ Tried Barlow Twins with PROJ_DIM=3 (outputs → `MJO/barlow/D3/`). Confirms the 
 **Best figure yet:** the D=3 **PCA-2D is a three-armed star** whose arms are the three ENSO categories (Neutral / La Niña / El Niño), with amplitude as the radial extent — a clean label-free layout of the ENSO states as 3 directions. Still **no phase loop** (phase random).
 
 **Takeaways:** (1) phase failure is dimension-independent (structural, invariance-SSL) — settled 3×; (2) the ENSO/amplitude envelope is the robust signal, ~2-D, and at D=3 collapses to ~1 dominant ENSO axis; (3) BT fine-tuning keeps degrading the encoder's phase → **freeze the encoder (train projector only) if f64 is to stay a phase representation** for the three-way comparison. Fixed the stale "7-D/z7" figure title to use PROJ_DIM.
+
+## Session 47 — Collapse Fix Ported to Training Notebooks + Barlow-Twins Viz/Trajectory Tooling + Docs (2026-06-24)
+
+Consolidated record of everything changed this session. (Supersedes the earlier Codex-authored Sessions 47–48 — CV-summary audit + `6.2.pdf` review — which the user asked to remove; that substance now lives in `results/summary_upto_260623.md`.)
+
+### A. Collapse fix ported into the canonical training notebooks
+The nb07d/nb07e finding — a 2-D, non-L2-normalized, raw-dot-product InfoNCE at **τ=0.5 collapses onto a line**; fix = **τ=0.07 + VICReg** (variance hinge + covariance decorrelation) — previously lived only in the nb07d sweep harness. Now applied to the actual training notebooks:
+- **nb07c** (BSISO supervised 2D): `TEMPERATURE 0.5→0.07`; added `vicreg_terms()` and `USE_VICREG/VICREG_VAR=25/VICREG_COV=1`; train loss = InfoNCE + VICReg; `RUN_TAG='2d_lee_fixed'`. Retrain required (no clean checkpoint ever existed — the old `encoder_sup2d_fixed_final.pth` was the worst plateau+ES seed). Expect ~52% phase, eff_rank≈2, no collapse.
+- **nb14** (MJO supervised 2D): identical patch, `RUN_TAG='mjo_sup_fixed'`. nb14 is the direct MJO analog of nb07c (both supervised).
+- **nb15** (MJO SSL temporal 2D): briefly patched then **reverted to original** at user request — 15 was the wrong target; 14 is the supervised analog. nb15+nb08 remain the untouched SSL-temporal pair.
+- Operational lesson logged: the fix only takes effect on a **fresh kernel** — Restart & Run All so the new Cell 1 (τ=0.07) loads. A stale kernel kept τ=0.5 and collapsed again (diagnosed from the figure title still printing τ=0.5).
+
+### B. nb26 (MJO Barlow Twins) — robustness + analysis + viz
+- **Cell 7**: dynamic `{PROJ_DIM}-D`/`{LATENT_DIM}-D` labels (was hardcoded 7-D/64-D); guarded `pair_counts` (Cell 3) and `hist` (Cell 5) via `globals().get` so the results JSON saves even when those cells weren't re-run; added a NOTE + load snippet warning when the projector is **untrained** (running Cell 7 without Cell 5 = random projector → misleadingly different numbers; this caused a confusing run).
+- **`PROJ_DIM` configurable** (ran D=3 and D=7); outputs routed to per-dim folder `MJO/barlow/D{PROJ_DIM}/` so runs don't clobber.
+- **Steep τ-decay** schedule added (configurable exp/linear, default 1.0→0.05) — tested whether it rescues MJO phase; it does **not** (structural to invariance-SSL).
+- **Cell 8** ENSO-modulation dimensionality: SVD of the per-phase EN−LN displacement matrix `M(8×D)`; reports singular spectrum + **participation ratio** = effective # of modulation dimensions.
+- **Cell 9** PCA + t-SNE embedding scatter (by phase/ENSO/amplitude). **Cell 10** event trajectories.
+- **Trajectories → separate panels**: Cell 10 (and nb27) now plot each of the 3 strongest MJO events in its **own subplot** (shared background + axes) so overlapping paths are distinguishable.
+
+### C. nb27 — NEW standalone D=7 trajectory/viz notebook
+`27_mjo_barlow_d7_trajectories.ipynb`: a no-retrain viewer that loads the saved D=7 `embeddings_z7.npy` (no torch/GPU) and reproduces the PCA+t-SNE scatter + per-event PCA trajectories for D=7.
+
+### D. Docs
+- `cv_summary.md` → renamed/merged into **`results/summary_upto_260623.md`** (full project summary + CV blurb + headline-numbers table: RMM rotation-aligned r 0.947/0.971 & canonical 0.97/0.95; supervised vs SSL circular ρ 0.844 vs 0.305; SSL ENSO z 14.55 no-labels vs 2.53 supervised; NSV d̂ 4/7 with z 12.5/20.9; BT ~2-D envelope).
+- Removed Codex Sessions 47–48 per user.
+
+### E. Results recap (unchanged)
+Barlow Twins recovers the **slow ENSO/amplitude envelope** (modulation ~2-D: PR≈2 at D=7, ≈1.7 at D=3) but **cannot represent the cyclic MJO phase** (phase≈random at every D; structural — τ-decay doesn't fix it). The D=3 projector PCA forms a clean **three-arm ENSO map**.
+
+### Next (pending this session)
+Implement **3-D PCA trajectories** for the Barlow-Twins embedding — extend the per-event PCA trajectory plot to 3 principal components on 3-D axes.
 
 ---
 
