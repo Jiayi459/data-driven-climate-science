@@ -4893,6 +4893,27 @@ Built and ran the diagnostics-first Phase 1-3 of the moisture-constraint experim
 
 Outputs: `MJO/moisture_constraints/results/diagnostics/` (diagnostics_summary.json + 7 PNGs + 4 CSVs). Commits: e40ceba (nb28-30) -> 5bffc15 (half-year split) -> 8427ed3 (optional winds) -> 18f7180 (partial coverage) -> 2d7361d (local temp dir) -> e72cbff (Cell 1 imports) -> e7a2cff (sign labels).
 
+## Session 52 — Methods Clarifications: delta_theta geometry; latent cycle = time<->east; Cell 9 + nb31 (2026-06-28)
+
+User asked precise conceptual questions about the moisture-convection diagnostic; documenting the answers.
+
+**1. What delta_theta is.** Yes: `delta_theta(field) = (cycle phase theta at which the field's intraseasonal anomaly peaks) - (cycle phase at which convection = -OLR peaks)`. Computed per longitude (or summed over a region) via the first complex harmonic `A_f(x) = <f(t,x) e^{i theta(t)}>`; `arg(A_f)` = peak phase, `|A_f|` = cycle amplitude. **Sign: negative = field leads convection (sits east of it).** Fields: q_col (column moisture), q_low (1000-700 hPa), dq_col/dt (tendency).
+
+**2. Binning vs the harmonic (important distinction).** The 16 sectors are used ONLY for the **composite picture** (Cell 4 phase-longitude Hovmoller): days are dropped into 16 equal theta-wedges (~635 active days each) and the field is averaged per wedge. The **delta_theta NUMBERS** (Cells 5-6, region_offset) are NOT from bins — they use the **continuous per-day** projection `<f e^{i theta}>`. Both estimate the same first-harmonic phase; binning is only for visualization.
+
+**3. Why the x-axis is LONGITUDE, not time.** Each field is **meridionally averaged** -> a profile over longitude: `field[day, lon]` (180 lon points across the tropics). Longitude is the field's intrinsic SPATIAL coordinate; it is never time. So: (a) phase-longitude composite has y = theta-bin (cycle phase) and x = longitude, each cell = mean field anomaly at that longitude for days in that phase bin; (b) the harmonic `A_f(x)` is computed **independently at each longitude** ("across all active days, at what cycle phase does the field at longitude x peak?") -> delta_theta is a function of longitude. Time never appears on an axis; it is collapsed into the phase angle theta.
+
+**4. Does the latent cycle mean time or geography? BOTH, linked by eastward propagation.**
+- **Temporal:** theta is the MJO life-cycle position; consecutive days of an event advance theta; one full cycle ~ 30-60 days.
+- **Geographical:** because the MJO **propagates eastward**, advancing theta also moves the convection center to more eastern longitudes. The **eastward tilt** in the phase-longitude composite (convection red band rising SW->NE) IS this time<->east correspondence.
+- The latent angle itself is an abstract cycle phase, NOT a longitude. At a FIXED longitude the field oscillates in time as theta advances; `delta_theta(x)` measures the temporal lead/lag between moisture and convection at that fixed longitude. So: the cycle is fundamentally a **time sequence**, and eastward propagation makes that temporal cycle correspond to an eastward **geographical** march of the active convection.
+
+**5. RMM vs learned latents.** nb30 used the **own-RMM** linear EOF index as the phase clock (the trustworthy "before" latent). The LEARNED-latent question ("do SSL / Barlow recover the same moisture-convection relation?") is answered by **nb30 Cell 9 (now date-aligned)**: it computes the same regional `delta_theta(q_col)` using each learned latent's angle theta_z = atan2(z2,z1), mapped from the bandpassed X_MJO_bp20_90 axis onto the moisture/own-RMM axis by date. A phase-bearing latent (SSL-nb15) should give delta_theta near own-RMM with healthy harmonic amplitude; a phase-blind latent (Barlow) gives near-zero amplitude / incoherent delta_theta.
+
+**Plan C delivered (commits 8a1933f, 3693de1):**
+- **Part 1** nb30 Cell 9 date-aligns SSL-nb15 / Barlow-D3 / Barlow-base latents to own-RMM and reports delta_theta(q_col) + harmonic amplitude (low amp = phase-blind).
+- **Part 2** nb31 `31_mjo_moisture_aux_latent.ipynb`: physics-informed 2D latent = nb15 temporal-contrastive backbone (collapse-fixed tau=0.07 + VICReg, no L2) + auxiliary decoder predicting q_col + OLR from z (`L = InfoNCE + lam_var*VICReg + lam_aux*(MSE q_col + MSE OLR)`). No imposed phase lag (data is moisture-mode-leaning); measures delta_theta in the LEARNED latent vs own-RMM/nb15 + ENSO displacement z + effective rank + 2D plane viz. q_col target date-aligned full->bp axis, missing-q days masked in the aux.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
