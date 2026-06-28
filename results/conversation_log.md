@@ -4800,4 +4800,99 @@ Implement **3-D PCA trajectories** for the Barlow-Twins embedding — extend the
 
 ---
 
+## Session 48 — MJO Physics-Informed Constraint Idea from Zhang et al. (2020) (2026-06-26)
+
+User proposed a new direction after reading Zhang et al. (2020), *Four Theories of the Madden-Julian Oscillation*: use the trained MJO latent phase angle theta, download/preprocess moisture data, composite moisture and OLR by latent-phase bins, compute a phase offset such as delta theta = theta_q - theta_OLR, and use it to infer whether the SSL latent space is recovering a skeleton-theory-like moisture/convection quadrature or a moisture-mode-like in-phase moisture/precipitation relationship. Ultimate goal: add physically motivated constraints to the MJO SSL loss so the latent space forms interpretable patterns related to MJO physics and potentially ENSO modulation.
+
+Codex copied the PDF into `results/zhang2020_four_theories_mjo.pdf` and extracted text to `results/zhang2020_mjo_theories_extracted.txt`. Key takeaways: section 4.6 states that skeleton theory sets lower-tropospheric moisture and convective activity to oscillate against each other, like a predator-prey system, contrasting with moisture-mode theory where precipitation and moisture are in phase. Section 5 emphasizes precipitation proportional to column/free-tropospheric moisture, moisture advection east of convection, and cloud-radiative feedback. Section 7 emphasizes boundary-layer convergence leading convection, Kelvin-Rossby coupling, and BL premoistening. Section 8 identifies useful validation targets beyond moisture/OLR phase: BL convergence, cloud-radiative feedback, Kelvin-Rossby structure, gravity-wave/multiscale activity, group velocity, and Rossby-Kelvin ratio.
+
+Preliminary assessment: the theta_q - theta_OLR diagnostic is a strong first-pass interpretability test, but should be formulated as a circular phase-lag/cross-spectrum diagnostic, not only bin-composite subtraction. It can distinguish skeleton-like quadrature/lead-lag from moisture-mode-like in-phase behavior, but cannot by itself prove a full theory because skeleton wave activity is not directly OLR and moisture-mode theory involves column/free-tropospheric moisture, cloud-radiative feedback, and moisture advection. Needed clarifications before implementation: which latent representation to constrain (MJO SSL 2-D, NSV 7-D, Barlow projector, or a new model), which moisture variable/levels to use, whether the target is diagnostic-only or training-time regularization, and whether ENSO stratification should enter the constraint.
+
+---
+
+## Session 49 — New MJO Moisture-Convection Constraint Experiment Folder (2026-06-26)
+
+User clarified the next direction: try a Barlow Twins-style 2D latent space, use column-integrated moisture first, and make this a new training experiment rather than only a diagnostic. Codex recommended trying 2D Barlow Twins, but **not** the previous temporal-lag invariance objective alone, because earlier nb26 results showed temporal invariance suppresses cyclic MJO phase. Recommended design: same-day augmented or cross-variable Barlow Twins views, plus a weak phase/dynamics term and then moisture/convection constraints after diagnostics identify the target phase relation.
+
+Created new self-contained folder:
+
+```text
+notebooks/mjo_moisture_constraints/
+├── README.md
+├── notebooks/
+└── results/
+```
+
+Per user request, no separate plan file is kept. The full plan is written directly in `notebooks/mjo_moisture_constraints/README.md` and summarized here in the conversation log.
+
+Plan decisions:
+- Primary moisture variable: column-integrated moisture / total column water vapor, because this aligns with moisture-mode theory.
+- Secondary diagnostic to add later: lower-tropospheric moisture, because skeleton theory emphasizes lower-tropospheric moisture.
+- Diagnostic first: compute latent phase `theta_z`, composite moisture and `-OLR` by phase bin, and compute first-harmonic circular phase offset `delta_theta_q_conv = arg(A_q) - arg(A_-OLR)` with bootstrap confidence intervals.
+- Training sequence: moisture download, moisture preprocessing, latent-moisture diagnostics, new 2D physics-informed Barlow training, final analysis.
+- Candidate constraints: same-day Barlow Twins redundancy reduction, VICReg variance floor, temporal phase smoothness/order without temporal invariance, auxiliary moisture/OLR prediction, measured phase-lag regularizer, and optional radial slow-envelope constraint for ENSO/amplitude.
+
+Scientific caution: do not force a skeleton-like or moisture-mode-like phase lag before measuring it. The diagnostic should determine whether moisture and convection are in phase, in quadrature, or longitude/ENSO dependent; then the training loss can regularize toward the observed relation.
+
+Update: moved this new experiment folder from `experiments/mjo_moisture_constraints/` to `notebooks/mjo_moisture_constraints/` so it lives with the rest of the notebook-driven project.
+
+---
+
+## Session 50 — Step-by-Step Implementation Plan for MJO Moisture Constraints (2026-06-26)
+
+User requested a concrete implementation plan based on the Zhang et al. (2020) moisture/convection theory discussion. Codex added a detailed "Step-by-Step Implementation Plan" directly to `notebooks/mjo_moisture_constraints/README.md` (no separate plan file).
+
+Implementation phases:
+
+1. **Phase 0 — Lock inputs and naming:** define experiment root, Google Drive root, moisture variable, latent target, diagnostic baselines, convection proxy `-OLR`, and shared config.
+2. **Phase 1 — Moisture download:** create `01_mjo_moisture_download.ipynb`; prefer ERA5 total column water vapor, fallback to pressure-level specific humidity and vertical integration; output raw moisture files.
+3. **Phase 2 — Moisture preprocessing:** create `02_mjo_moisture_preprocess.ipynb`; match MJO preprocessing exactly: longitude convention, meridional average, annual-cycle removal, slow-background removal, normalization, and 20-90 day bandpass; output processed column/lower-tropospheric moisture arrays.
+4. **Phase 3 — Diagnostics before training:** create `03_mjo_latent_moisture_diagnostics.ipynb`; diagnose existing MJO SSL 2D, NSV 7D, and Barlow D=3/D=7 embeddings; compute latent phase, moisture/`-OLR` composites, first-harmonic phase offset `delta_theta_q_conv`, bootstrap CIs, regional summaries, and ENSO-stratified offsets.
+5. **Phase 4 — Baseline 2D same-day Barlow Twins:** create `04_mjo_bt2d_physics_train.ipynb`; train non-collapsed 2D latent using same-day augmented/cross-variable views plus Barlow Twins and variance floor; explicitly avoid temporal-lag invariance.
+6. **Phase 5 — Add phase/dynamics constraint:** weakly preserve temporal order with speed/turn/angular-smoothness terms, without forcing a perfect oscillator.
+7. **Phase 6 — Add moisture-convection constraint:** only after diagnostics determine target; start with auxiliary moisture/OLR prediction, then optionally use moisture-mode in-phase or skeleton-like phase-lead regularizer measured from data.
+8. **Phase 7 — Final analysis:** create `05_mjo_bt2d_physics_analysis.ipynb`; compare against RMM, previous InfoNCE SSL, NSV, prior Barlow D=3/D=7, and new BT2D variants using RMM phase metrics, circular correlation, ENSO z, collapse metrics, moisture-convection phase offset, ENSO-stratified offset, and Kelvin-Rossby wind composites.
+
+Key decision gates:
+- Do not train physics loss until moisture/OLR phase diagnostics are measured.
+- Do not reuse temporal-lag Barlow invariance as the only objective because it suppresses MJO phase.
+- If 2D cannot hold phase plus moisture/ENSO structure, escalate to 3D/4D with a 2D phase plane plus slow coordinate.
+
+## Session 51 — MJO Moisture-Convection Diagnostics (nb28-30): Results + Debug Saga (2026-06-28)
+
+Built and ran the diagnostics-first Phase 1-3 of the moisture-constraint experiment as **global-sequence** notebooks in `notebooks/mjo/` (per user: continue numbering at 28, not the experiment-folder 01-05 names).
+
+**Notebooks created**
+- **nb28** `28_mjo_moisture_download.ipynb` — ERA5 TCWV (column q), q at 1000/925/850/700 hPa (lower-trop), u/v at 1000/925 (BL divergence). Same domain/grid/period as nb12 (15S-15N, 2deg, 1979-2023, 4x/day -> daily mean).
+- **nb29** `29_mjo_moisture_preprocess.ipynb` — nb13 pipeline verbatim (merid-avg, 3-harmonic annual cycle base 1979-2001, 120d preceding running mean, global std-norm); builds `q_col` (=TCWV), `q_low` (1000-700 hPa integral /g), `div_low` (1000/925 divergence); row-aligned to X_MJO / labels / own-RMM.
+- **nb30** `30_mjo_latent_moisture_diagnostics.ipynb` — own-RMM (nb24) primary phase clock; first-harmonic `delta_theta(field, -OLR)`; Rossby-Kelvin ratio; BL-convergence lead; all ENSO-stratified with bootstrap CIs.
+
+**Debug saga (all fixed; commits at end)**
+1. CDS `403 cost limits exceeded` on full-year q -> split each year into two half-year sub-requests (nb12's OLR trick).
+2. Google Drive filled mid-download. ROOT CAUSE: on Drive, `os.remove()` moves files to **Trash**, which keeps counting against the 15 GB quota for 30 days; the huge 4x/day temp sub-files piled up there. Fix: write temp subs to **local Colab disk** (`/content/`), only final daily files to Drive. (Also clarified: an earlier "verification passed" was reading the FUSE cache, not files actually synced to Drive while over quota.)
+3. Partial moisture record (download had only reached ~1979-1993): nb29 now NaN-fills uncovered days into full-length (N) arrays (row alignment preserved); nb30 restricts active days to moisture-covered ones + NaN-robust harmonics. (Final run reached the full record: 10177 active days.)
+4. Low-level winds made optional (uvplev for BL/trio only); core q_col/q_low result needs only TCWV+q.
+5. nb30 Cell 1 lost its imports during a patch (`NameError: np`) -> restored.
+6. **Sign convention:** theta oriented eastward (circ-corr own-RMM vs official phase = **+0.87**, monotonic). **NEGATIVE delta_theta = field LEADS convection (sits east of it).** Notebook labels + skeleton reference line corrected to -90.
+
+**RESULTS (full record, 10177 active MJO days, own-RMM clock)**
+- `delta_theta(q_col, conv)` = IO -19, MC -29, WP -25 deg -> column moisture nearly **in phase** -> **moisture-mode** signature (NOT skeleton's 90 deg quadrature).
+- `delta_theta(q_low, conv)` = IO -24, MC -45, WP -49 deg -> lower-trop moisture leads MORE, growing eastward -> **skeleton-flavored low-level recharge** (but only ~half a quadrature).
+- **q_low - q_col gap** = -6 (IO) -> -15 (MC) -> -24 (WP) deg: the skeleton<->moisture-mode tension, quantified and widening eastward.
+- `delta_theta(dq_col/dt)` = -105..-128 deg (leads q_col by ~90 deg -> internal-consistency check OK; moistening tendency east of convection = propagation driver, Zhang Sec 5).
+- **Rossby-Kelvin ratio = 1.34** (obs ~1.0, Gill ~2.2) -> realistic coupled K-R, not a Gill pattern (supports trio-interaction Sec 7.5).
+- **BL convergence lead** = IO -41, MC -60, WP -15 deg -> strong premoistening/convergence ahead of convection over the warm pool (trio-interaction BL feedback, Sec 7).
+
+**ENSO modulation (headline):** the longitude of the largest moisture lead **follows the warm pool**. La Nina: larger lead over Maritime Continent (q_low -51 vs EN -46); El Nino: larger lead over West Pacific (q_low -54 vs LN -45). Robust across q_col AND q_low. R-K ratio EN 1.26 < Neutral 1.34 < LN 1.37 (El Nino slightly more Kelvin-dominated).
+
+**Verdict:** the real MJO is **moisture-mode-LEANING** (column q ~in phase, not quadrature) **with a skeleton-flavored lower-tropospheric recharge** that strengthens eastward; ENSO shifts the active moisture-convection coupling east (El Nino) / west to the Maritime Continent (La Nina). Consistent with Zhang et al. (2020): the theories are complementary.
+
+**Caveat / TODO:** `secondary_latent_delta_theta.csv` contains **only own-RMM** -> the learned-latent comparison (SSL nb15, Barlow D3) did NOT run: nb15 embeddings not found at the globbed path, and Barlow-D3 embeddings live on the bandpassed (`X_MJO_bp20_90`, edge-trimmed) date axis so their row count != 16425 and were skipped. Need explicit date-alignment to compare learned latents to own-RMM.
+
+**Decision gate:** measured delta_theta is sub-quadrature / roughly in-phase -> the data supports a **moisture-mode-compatible auxiliary** constraint (latent predicts q + OLR, q ~in phase), NOT a forced 90 deg skeleton lead. The ENSO-stratified delta_theta is the result to build the explainable latent around. Next: Phase 4-6 auxiliary-prediction training on the nb15 backbone, or fix the learned-latent comparison first.
+
+Outputs: `MJO/moisture_constraints/results/diagnostics/` (diagnostics_summary.json + 7 PNGs + 4 CSVs). Commits: e40ceba (nb28-30) -> 5bffc15 (half-year split) -> 8427ed3 (optional winds) -> 18f7180 (partial coverage) -> 2d7361d (local temp dir) -> e72cbff (Cell 1 imports) -> e7a2cff (sign labels).
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
