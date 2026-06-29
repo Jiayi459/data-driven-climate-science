@@ -4936,6 +4936,28 @@ Findings:
 
 **Verdict / next:** the auxiliary strongly retained ENSO and produced a phase-ordered, amplitude/ENSO-structured manifold, but it is a crescent, not a closed ring. To open it into a clean 2-D phase plane: add a **covariance-decorrelation** term (VICReg covariance or Barlow off-diagonal) between z1,z2; optionally rebalance lam_aux; or escalate to 3-D (2-D phase plane + slow ENSO axis). Then re-measure nb31 Cell 6 delta_theta in the learned latent vs own-RMM's moisture-mode lead. Commits: 8a1933f (Cell 9 date-align), 3693de1 (nb31).
 
+## Session 54 — The 2-D wall, the 3-D failure, and the angle=phase insight (2026-06-29)
+
+Pushed the physics-informed latent through 2-D rebalance (nb31) and a 3-D disentangled design (nb32). Both fail to make the **neural** latent's polar angle equal MJO phase — a robust, instructive negative result.
+
+**nb31 2-D rebalance** (lam_aux 1->0.2, lam_var 5->1, lam_cov 2->1 so InfoNCE dominates; outputs aux2d_rebal/):
+- Training fixed: `nce` now DECREASES 4.69->4.43 (below chance ln(256)~5.55), eff_rank 2.00 (full disk), ENSO z 18.5.
+- BUT **circ_corr(theta,phase) still 0.17** (unchanged) and delta_theta off (IO -1, MC +24.7, WP +17.3 vs own-RMM -21/-29/-27). Phase is a diagonal LINEAR gradient across the disk, not the polar angle -> atan2 can't read it. Rebalancing fixes dynamics but NOT the angle!=phase geometry.
+
+**nb32 3-D** (z1,z2 L2-normalized -> unit circle so theta=atan2 is angular by construction; z3 free; cosine temporal InfoNCE on the circle + lam_aux 0.5 aux + var floor on z3; outputs aux3d/):
+- Cosine InfoNCE minimized (`nce` 4.57->4.25 < chance). BUT **circle circ_corr = 0.03** (WORSE than 2-D) — all 8 phases smeared uniformly around the ring, no angular ordering.
+- **Phase leaked onto z3** (clear V/funnel of z3 vs cycle), and **z3 did NOT separate ENSO** (El Nino vs La Nina means -0.16 vs -0.12, 0.04 std). Full-3D ENSO z 13.3. The intended disentanglement failed (wrong things on wrong axes).
+
+**Root-cause insight:** `atan2 = phase` is a **quadrature / linear-EOF property**. own-RMM works (circ_corr 0.65) because PC1,PC2 are the cos/sin of the propagating wave (90 deg apart by EOF). The neural contrastive **never enforces quadrature** — "pull temporal neighbors together" has many solutions where the cycle winds/folds around the circle, and the optimizer picks one where the angle is not RMM phase. L2-norm in 3-D only removed the radial DOF and let phase squirt onto z3. Demonstrated 3 ways: 2-D no-L2 (0.17), 2-D rebalanced clean-training (0.17), 3-D explicit circle (0.03).
+
+**Conclusion:** a clean ANGULAR phase coordinate belongs to linear EOF (own-RMM); self-supervised nets capture phase+ENSO **content** strongly (ENSO z 13-19) but not as a polar angle, regardless of dimension/normalization. Consistent with the project's phase-vs-slow-envelope theme.
+
+**Two paths (awaiting user choice):**
+- **A (recommended):** accept the division of labor — own-RMM = clean phase clock (the moisture-mode + ENSO-modulation science is already done on it); neural SSL = strong label-free ENSO capture. Present them complementary; stop chasing angle=phase in the net.
+- **B:** force it with a quadrature/alignment loss (nb33): add `1 - cos(theta_z - theta_RMM)` so the encoder is taught to put phase on the angle, leaving z3 for ENSO. Semi-supervised (uses RMM target) but yields the explainable "angle=cycle, z3=ENSO" latent.
+
+Commits: 76bc494 (nb31 rebalance), 822bf5d (nb32 3-D), c607a78 (nb31 json fix).
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
