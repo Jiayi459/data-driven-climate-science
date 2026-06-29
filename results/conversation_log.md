@@ -4914,6 +4914,28 @@ User asked precise conceptual questions about the moisture-convection diagnostic
 - **Part 1** nb30 Cell 9 date-aligns SSL-nb15 / Barlow-D3 / Barlow-base latents to own-RMM and reports delta_theta(q_col) + harmonic amplitude (low amp = phase-blind).
 - **Part 2** nb31 `31_mjo_moisture_aux_latent.ipynb`: physics-informed 2D latent = nb15 temporal-contrastive backbone (collapse-fixed tau=0.07 + VICReg, no L2) + auxiliary decoder predicting q_col + OLR from z (`L = InfoNCE + lam_var*VICReg + lam_aux*(MSE q_col + MSE OLR)`). No imposed phase lag (data is moisture-mode-leaning); measures delta_theta in the LEARNED latent vs own-RMM/nb15 + ENSO displacement z + effective rank + 2D plane viz. q_col target date-aligned full->bp axis, missing-q days masked in the aux.
 
+## Session 53 — Learned-latent moisture comparison (nb30 Cell 9 run) + nb31 aux2d result (2026-06-29)
+
+**nb30 Cell 9 — does the LEARNED latent recover the moisture-convection lead?** (date-aligned, 10042 active&covered days). Per latent: circ_corr(theta,phase) | delta_theta(q_col) IO/MC/WP (deg) | harmonic amplitude IO/MC/WP:
+- **own-RMM:** 0.87 | -19/-29/-25 | 5.9/5.8/4.7
+- **SSL-temporal-2D (nb15):** 0.17 | -2.4/-21.6/+4.0 | 3.56/2.02/0.72
+- **Barlow-D3:** 0.00 | -49/+80/-6.5 | 0.21/0.13/0.74
+- **Barlow-base:** 0.03 | +42/+79/+26 | 0.58/0.13/0.35
+
+Findings:
+1. **Harmonic amplitude cleanly rank-orders phase-awareness:** own-RMM ~5-6 >> SSL ~1-3.6 >> Barlow ~0.1-0.7. (Low |A| = the per-day "clock arrows" cancel = the latent angle has no consistent relation to the moisture cycle.)
+2. **Barlow CONFIRMED phase-blind** (negative control validated): |A|~0.1-0.7, circ_corr~0, and its delta_theta (-49, +80, ...) are **noise, not physics** (can't read a phase off |A|=0.13). Matches every prior BT finding (invariance-SSL discards cyclic phase).
+3. **SSL-temporal PARTIALLY phase-aware:** carries a real moisture cycle (|A| 2-3.6 in IO/MC); its MC offset -21.6 is in the moisture-mode ballpark (own-RMM -29.4). But circ_corr only 0.17 -> atan2(z2,z1) is a rotated/compressed phase coordinate (the latent is a CRESCENT, not a closed ring), so IO/WP are unreliable.
+4. **Bottom line:** the **linear own-RMM is the cleanest phase clock** for this diagnostic; learned latents are great at ENSO but give noisier angular coordinates; Barlow has no usable phase. For the moisture-convection science, use own-RMM as the clock.
+
+**nb30 Cell 10 (own-RMM, full record), unchanged:** q_col -19/-29/-25, q_low -24/-45/-49, gap -6/-15/-24 (widens east), R-K 1.34 -> moisture-mode-leaning + skeleton low-level recharge.
+
+**nb31 design (aux2d, physics-informed latent):** nb15 temporal-contrastive backbone (pairs day t vs t+/-<=3 same year; raw-dot InfoNCE tau=0.07; MJOEncoderNoL2 Conv2d, 2D, no L2) + VICReg **variance** floor (lam_var=5) + two decoders predicting q_col and OLR longitude profiles from z (lam_aux=1, MSE, missing-q masked). `L = InfoNCE + 5*VICReg_var + 1*(MSE q_col + MSE OLR)`. 80 epochs, Adam, cosine, bs256. Idea: contrastive organizes the temporal cycle, VICReg prevents collapse, the auxiliary forces z to encode moisture/convection so the plane is physically readable.
+
+**nb31 result:** ENSO displacement z = **19.4** (excellent; ~NSV 20.9, >> supervised 2.5) and a **crescent manifold** with phase ordered along the arc (P8/P1 -> P3-5), amplitude ~ radius, El Nino on the outer edge. BUT **eff_rank 1.33** = nearly 1-D (an arc, not a full ring). **Cause:** only the VICReg *variance* term was used, not the **covariance decorrelation**, so z1,z2 stayed correlated -> elongated crescent (also why the angle is a compressed phase coordinate / low circ_corr).
+
+**Verdict / next:** the auxiliary strongly retained ENSO and produced a phase-ordered, amplitude/ENSO-structured manifold, but it is a crescent, not a closed ring. To open it into a clean 2-D phase plane: add a **covariance-decorrelation** term (VICReg covariance or Barlow off-diagonal) between z1,z2; optionally rebalance lam_aux; or escalate to 3-D (2-D phase plane + slow ENSO axis). Then re-measure nb31 Cell 6 delta_theta in the learned latent vs own-RMM's moisture-mode lead. Commits: 8a1933f (Cell 9 date-align), 3693de1 (nb31).
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
