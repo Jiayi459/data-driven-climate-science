@@ -4978,6 +4978,32 @@ Approved scope (user): probe **SSL-nb15 first** (others pluggable later); **incl
 
 **Data contract:** SSL embeddings `results/ssl/embeddings.npy` (bp axis, 2-D); `labels_aligned_mjo_bp20_90.csv` (phase/amp/ENSO/weak/date); `X_MJO_bp20_90` (ch1 OLR -> convection longitude, ch0 u850 -> R-K); own-RMM mapped to the bp axis by date; Nino3.4 if available. Output: `MJO/moisture_constraints/results/latent_content/`. Notebook: `33_mjo_latent_content.ipynb`, SSL-nb15 primary via a LATENTS dict.
 
+## Session 56 — nb33 results: the SSL latent is a 1-D wind-phase oscillator (hypothesis overturned) (2026-06-30)
+
+Ran nb33 on SSL-nb15 (10042 active days). The "slow ENSO/amplitude envelope" hypothesis is **WRONG**; the truth is more specific and interesting.
+
+**Probes (linear / MLP, val):**
+- MJO phase (8-cls): 0.235 / 0.241 (vs 0.125 chance) — weak (~2x), and **linear** (MLP no better -> not nonlinearly hidden).
+- amplitude (R2): **0.07 / 0.05** — ~zero. The latent does NOT encode MJO amplitude.
+- ENSO (3-cls bal-acc): **0.40 / 0.32** (vs 0.33) — barely above chance. ENSO is NOT directly classifiable.
+- convection longitude (R2): **-0.00 / -0.01** — ZERO. Does NOT encode where convection is.
+- calendar month (12-cls): 0.16 / 0.17 (vs 0.083) — ~2x chance (weak seasonal).
+
+**Direction-regression (geometry):** `sin(phase)` **R2=0.38** (single best target), `cos(phase)` only 0.12, **and both load on the SAME axis** ([-0.96,-0.27] vs [-0.98,-0.20]). amplitude 0.11, ENSO 0.02, conv_lon 0.00.
+
+**Power spectrum:** z1 has a sharp **~50-day peak tracking own-RMM PC1**; **72% of z1 power is in the 30-90 d MJO band** (NOT slow). The `|z|` envelope is slow (>100 d). Eastward power slightly > westward in-band (weak propagation).
+
+**Hard targets:** MC-crossing 0.752/0.742 vs 0.754 baseline = **no skill** (does NOT encode propagation/MC-crossing). Life-cycle 0.36/0.39 vs 0.33 = weak. **Rossby-Kelvin ratio R2 = 0.39 / 0.37** = the latent DOES encode the u850 R-K asymmetry.
+
+**Verdict — what the SSL latent encodes:** a **single MJO-band (~50-d) oscillating coordinate aligned with the low-level WIND (Kelvin-Rossby) circulation** = one quadrature component of the wind cycle (sin-phase, R2 0.38) + the **R-K zonal-wind asymmetry** (R2 0.39), with a slow radius (activity envelope). It does NOT encode convection location, amplitude, or MC-crossing. Three clean consequences:
+1. **circ_corr 0.17 fully explained:** the 2 dims are NOT a quadrature pair (z1~sin-phase, z2 redundant; cos-phase loads on the same axis) -> only one quadrature component -> no clean angle. (own-RMM works because PC1 perp PC2 = sin/cos by EOF.)
+2. **Tracks wind, not convection** — even though OLR is an input, the contrastive latched onto the cleaner zonal-wind signal + its asymmetry, ignoring OLR convection longitude entirely.
+3. **ENSO is INDIRECT:** ENSO barely classifiable (0.40) yet displacement-z high (~14) because the **R-K wind structure it captures is itself ENSO-modulated** (nb30: R-K 1.26 EN < 1.37 LN) -> ENSO leaks in via wind structure, not a dedicated ENSO axis.
+
+Publishable-quality point: a self-supervised contrastive net on MJO fields learns a 1-D low-level-wind-phase oscillator (one quadrature component, ENSO-modulated), not the full phase angle, not convection, not amplitude. Outputs: `MJO/moisture_constraints/results/latent_content/` (`SSL-nb15_content_summary.json`, `_probes/_directions/_spectrum` PNGs, `_probes.csv`, `_hard_targets.csv`). Commit 7531dc2 (nb33).
+
+**Next:** point nb33 at aux2d / aux3d / NSV-7D / Barlow (add to LATENTS dict) and contrast — does the moisture-aux / NSV / invariance objective shift the encoding toward convection / amplitude / slow-envelope? CKA across latents.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
