@@ -5004,6 +5004,33 @@ Publishable-quality point: a self-supervised contrastive net on MJO fields learn
 
 **Next:** point nb33 at aux2d / aux3d / NSV-7D / Barlow (add to LATENTS dict) and contrast — does the moisture-aux / NSV / invariance objective shift the encoding toward convection / amplitude / slow-envelope? CKA across latents.
 
+## Session 57 — nb33 multi-latent comparison: objective -> representation map (2026-06-30)
+
+Ran nb33 v2 (direct field-reconstruction + multi-latent comparison). NSV-7D skipped (wrong path). Comparison (val):
+
+| latent | dim | phase_acc | amp_R2 | ENSO_bal | convlon_R2 | RK_R2 | u850rec_R2 | OLRrec_R2 | MJOband_frac |
+|---|---|---|---|---|---|---|---|---|---|
+| SSL-nb15 | 2 | 0.235 | 0.072 | 0.399 | -0.00 | 0.386 | **0.159** | 0.064 | 0.420 |
+| aux2d | 2 | 0.248 | 0.198 | 0.375 | -0.01 | 0.374 | 0.178 | 0.077 | 0.796 |
+| aux2d_rebal | 2 | 0.232 | 0.219 | 0.389 | -0.01 | 0.380 | 0.159 | 0.065 | 0.580 |
+| aux3d | 3 | 0.325 | 0.311 | 0.373 | 0.04 | 0.418 | 0.282 | 0.121 | 0.571 |
+| Barlow-D3 | 3 | 0.121 | 0.078 | 0.395 | -0.01 | -0.004 | -0.002 | -0.001 | 0.030 |
+| Barlow-D7 | 7 | 0.120 | 0.222 | 0.404 | -0.00 | -0.004 | -0.002 | -0.001 | 0.098 |
+
+(baselines: phase 0.125, ENSO 0.333; recon/R2 0 = none; MJOband_frac 1 = all 30-90 d power)
+
+**Wind vs convection — DIRECTLY confirmed** (replaces the inferred claim): every contrastive latent reconstructs **u850 ~2.3-2.5x better than OLR** (SSL 0.159 vs 0.064). Even aux2d/aux3d, *trained to predict OLR*, stay wind-dominated (OLR-rec only nudged 0.064->0.121). Caveat: OLR' is noisier/higher-rank than smooth u850', so part of the gap is reconstructability — but the consistent 2.3x + RK(wind) 0.39 vs convlon(OLR) 0.00 makes wind-dominance robust.
+
+**Objective -> representation map:**
+- **SSL temporal-contrastive:** intraseasonal (MJOband 0.42) **low-level wind-phase oscillator** (one quadrature component: phase_acc 0.24 ~2x chance, RK_R2 0.39, u850>>OLR), ENSO-modulated (displacement-z high but classifiable only ~0.40).
+- **+ moisture/OLR auxiliary (aux2d/aux2d_rebal/aux3d):** the aux's real effect is to **add AMPLITUDE** (amp_R2 0.07 -> 0.20-0.31), slightly more OLR, but still wind-dominated and intraseasonal; aux3d is richest (phase 0.33, amp 0.31, u850rec 0.28, RK 0.42).
+- **Barlow invariance (D3/D7):** **slow envelope** (MJOband_frac 0.03-0.10), reconstructs **neither** field (u850/OLR rec ~0), no RK, phase at chance -> genuinely discards the propagating intraseasonal structure, keeps only the slow amplitude/ENSO envelope. The airtight version of the project's phase-vs-envelope dichotomy.
+- **ENSO uniformly weakly classifiable (~0.40) across ALL latents** (even Barlow) -> ENSO enters as a subtle *structured* signal (high displacement-z), never a directly-decodable axis.
+
+**Result in one line:** contrastive SSL learns an intraseasonal low-level WIND-phase representation (+R-K, ENSO-modulated); the moisture auxiliary adds amplitude; invariance/Barlow collapses to the slow envelope. A clean objective->representation map, fully consistent with all prior sessions.
+
+TODO: fix NSV-7D embedding path (currently `MJO/nsv/embeddings_v.npy` -> skipped) and add NSV to the comparison. Outputs: `latent_content/latent_comparison.csv`, `field_reconstruction.csv/png`, `latent_content_summary.json`. Commit 6c9caaf (nb33 v2).
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
