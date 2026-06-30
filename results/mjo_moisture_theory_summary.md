@@ -99,12 +99,33 @@ The SSL latent has high ENSO z but a near-useless phase angle — so what is it 
 **Concrete test (proposed nb33 — latent-content analysis):**
 1. **Linear probes** from the frozen SSL latent for: MJO phase (8-class accuracy), MJO **amplitude** (regression R²), **ENSO** category (3-class balanced accuracy), **longitude of minimum-OLR** (convection centre), and **calendar month/season** (confound check).
 2. **Regress each physical variable onto the latent** to recover its direction; quantify how much variance each explains.
-3. **Prediction:** amplitude- and ENSO-probes high; phase-probe modest; season ≈ chance. If borne out, it confirms the SSL latent is a *slow ENSO/amplitude-envelope* representation, not a phase representation — closing the loop on why its angle isn't phase.
+3. *(Resolved — see §8.)* The naive "slow envelope" guess turned out **wrong**: the SSL latent is an *intraseasonal wind-phase* representation.
+
+---
+
+## 8. RESOLVED — what each *objective* makes the net encode (nb33)
+
+Probing the frozen latents — linear+MLP probes, direction-regression, latent power spectrum, and a **direct u850-field vs OLR-field reconstruction** — answered §7. The result is a clean principle, not the slow-envelope guess.
+
+| objective | phase | amp | R-K (wind) | u850 recon | OLR recon | MJO-band frac | encodes |
+|---|---|---|---|---|---|---|---|
+| **Contrastive (SSL)** | 0.24 | 0.07 | 0.39 | 0.16 | 0.06 | 0.42 | minimal: low-level **wind-phase** (one quadrature component) |
+| **+ moisture aux (3-D)** | 0.33 | 0.31 | 0.42 | 0.28 | 0.12 | 0.57 | wind-phase **+ amplitude** |
+| **Invariance (Barlow)** | 0.12 (chance) | 0.08–0.22 | ~0 | ~0 | ~0 | 0.03–0.10 | **slow envelope** only (reconstructs *neither* field) |
+| **Lag-prediction (NSV-7D)** | **0.46** | 0.34 | **0.58** | **0.53** | **0.21** | 0.60 | **full predictable state** (wind+convection+phase+amplitude) |
+
+*(baselines: phase 0.125, ENSO 0.333. Every latent's ENSO probe ≈ 0.37 — ENSO is a **structured** signal, not a directly-decodable axis, because the 20–90 d band-pass removed the slow ENSO from the input.)*
+
+**Two findings:**
+1. **Wind vs convection (direct test):** every contrastive latent reconstructs **u850 ≈ 2.3–2.5× better than OLR** — it encodes the low-level *wind* structure, not convection. NSV (prediction) reconstructs convection ~3× better than contrastive, because forecasting *needs* convection.
+2. **The unifying principle — representation richness tracks the *information the objective demands*:** prediction (NSV) must forecast the full state → richest; contrastive only needs to discriminate temporal neighbours → grabs the single cleanest signal (wind-phase); invariance is rewarded for discarding change → slow envelope. **The training objective, not the architecture, decides what physics the latent encodes.**
+
+This also resolves the earlier puzzles: the SSL angle ≠ phase (it captures only one wind quadrature component, not the EOF sin/cos pair), and the high ENSO *displacement*-z with low ENSO *classifiability* (ENSO modulates the wind structure these latents capture).
 
 ---
 
 ## Artifacts
 
-- **Notebooks:** `28_mjo_moisture_download`, `29_mjo_moisture_preprocess`, `30_mjo_latent_moisture_diagnostics`, `31_mjo_moisture_aux_latent` (2-D physics-informed), `32_mjo_moisture_aux3d_latent` (3-D disentangled).
-- **Diagnostics outputs:** `MJO/moisture_constraints/results/diagnostics/` — `diagnostics_summary.json`, `delta_theta_regions.csv`, `enso_stratified_delta_theta.csv`, `bl_convergence_lead.csv`, `secondary_latent_delta_theta.csv`, + 7 PNGs.
-- **Conversation log:** Sessions 48–54 (`results/conversation_log.md`).
+- **Notebooks:** `28_mjo_moisture_download`, `29_mjo_moisture_preprocess`, `30_mjo_latent_moisture_diagnostics`, `31_mjo_moisture_aux_latent` (2-D physics-informed), `32_mjo_moisture_aux3d_latent` (3-D disentangled), `33_mjo_latent_content` (latent-content + wind-vs-convection + multi-latent comparison).
+- **Diagnostics outputs:** `MJO/moisture_constraints/results/diagnostics/` (Δθ, R-K, BL, ENSO) and `.../latent_content/` (`latent_comparison.csv`, `field_reconstruction.csv/png`, probes/directions/spectrum).
+- **Conversation log:** Sessions 48–58 (`results/conversation_log.md`).

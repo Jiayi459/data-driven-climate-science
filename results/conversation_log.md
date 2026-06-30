@@ -5031,6 +5031,30 @@ Ran nb33 v2 (direct field-reconstruction + multi-latent comparison). NSV-7D skip
 
 TODO: fix NSV-7D embedding path (currently `MJO/nsv/embeddings_v.npy` -> skipped) and add NSV to the comparison. Outputs: `latent_content/latent_comparison.csv`, `field_reconstruction.csv/png`, `latent_content_summary.json`. Commit 6c9caaf (nb33 v2).
 
+## Session 58 — NSV completes the objective->representation map (richness ~ info demand) (2026-06-30)
+
+NSV-7D row (date-aligned v-space) added; overturns the "between contrastive and Barlow" guess — NSV is the RICHEST representation. Full comparison (val):
+
+| latent | phase | amp_R2 | ENSO_bal | convlon_R2 | RK_R2 | u850rec | OLRrec | MJOband |
+|---|---|---|---|---|---|---|---|---|
+| SSL-nb15 | 0.235 | 0.072 | 0.399 | -0.00 | 0.386 | 0.159 | 0.064 | 0.420 |
+| aux2d | 0.248 | 0.198 | 0.375 | -0.01 | 0.374 | 0.178 | 0.077 | 0.796 |
+| aux3d | 0.325 | 0.311 | 0.373 | 0.04 | 0.418 | 0.282 | 0.121 | 0.571 |
+| Barlow-D3 | 0.121 | 0.078 | 0.395 | -0.01 | -0.004 | -0.002 | -0.001 | 0.030 |
+| Barlow-D7 | 0.120 | 0.222 | 0.404 | -0.00 | -0.004 | -0.002 | -0.001 | 0.098 |
+| **NSV-7D** | **0.458** | **0.339** | 0.366 | **0.076** | **0.580** | **0.531** | **0.213** | 0.597 |
+
+NSV wins phase (0.46, ~4x chance), wind-recon (0.53, 3x SSL), R-K (0.58), and reconstructs convection ~3x better (OLR 0.21 vs ~0.06).
+
+**Unifying principle (the punchline): representation richness tracks the INFORMATION the objective demands.**
+- **Lag-prediction (NSV):** must forecast the state 10 d ahead -> encodes the COMPLETE predictable dynamical state (wind+convection+phase+amplitude). Richest by construction.
+- **Contrastive (SSL):** only needs to discriminate temporal neighbors -> grabs the single cleanest signal (low-level wind-phase), ignores the rest. Minimal.
+- **+ moisture aux:** adds exactly what predicting q/OLR requires = amplitude (amp_R2 0.07->0.31); stays wind-anchored.
+- **Invariance (Barlow):** rewarded for discarding what changes -> slow envelope only; reconstructs neither field, ~no MJO-band power.
+- ENSO ~0.37 classifiable everywhere (even NSV) -> structured signal, not a direct axis (band-pass removed slow ENSO).
+
+**Key reframing:** it is NOT that neural nets can't see convection — the CONTRASTIVE objective discards it (doesn't need it); the PREDICTION objective (NSV) keeps it (must). **The training objective, not the architecture, decides what physics the latent encodes.** Investigation complete. Commit 15e94ee (NSV cell); summary doc `mjo_moisture_theory_summary.md` updated with the full table.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
