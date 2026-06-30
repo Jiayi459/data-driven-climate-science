@@ -4958,6 +4958,26 @@ Pushed the physics-informed latent through 2-D rebalance (nb31) and a 3-D disent
 
 Commits: 76bc494 (nb31 rebalance), 822bf5d (nb32 3-D), c607a78 (nb31 json fix).
 
+## Session 55 — nb33 plan: what does the SSL latent encode (if not phase)? (2026-06-29)
+
+Approved scope (user): probe **SSL-nb15 first** (others pluggable later); **include the harder physical targets**; **power spectrum** as the label-free centerpiece.
+
+**Refined hypothesis (the key insight):** the SSL input `X_MJO_bp20_90` is **20-90-day band-passed**, so the slow ENSO/seasonal signal is filtered OUT of the input. Yet ENSO z ~18. Therefore the latent's "ENSO" is NOT a slow ENSO coordinate but the **ENSO-modulated *intraseasonal* MJO structure** (amplitude, convection longitude, R-K asymmetry differ by ENSO — exactly what nb30 measured). So the latent likely encodes the **MJO *state*** (amplitude + where convection sits + structural character), tangled, **ENSO-decodable via that structure**, with phase weak *as an angle*. nb33 tests this.
+
+**Methods (why each):**
+1. **Linear + MLP probes** (frozen latent, year-based split) for: own-RMM phase (8-class acc), RMM amplitude (R2), ENSO category (3-class balanced acc), **convection longitude** (argmin-OLR per day, R2), calendar month (confound). The **linear-vs-MLP gap = linear vs nonlinear storage** — linear probe alone underestimates nonlinearly-folded phase, so MLP is required.
+2. **Direction-regression (geometry):** regress amplitude / Nino3.4 / conv-longitude / sin,cos(phase) onto the 2-D latent -> best-fit direction + R2; draw the directions in the latent plane (which axis is what).
+3. **Latent power spectrum (label-free centerpiece):** periodogram of z1, z2, complex z1+i*z2, and |z| on the chronological bp axis; compare to the own-RMM spectrum. A ~30-90-day peak = phase; slower/broadband = amplitude/activity envelope. Distinguishes fast-phase vs slow-envelope WITHOUT labels.
+4. **Harder physical targets (Zhang et al. 2020):**
+   - **Propagating vs non-propagating / Maritime-Continent crossing** (Kim et al. 2014; Sec 9.2): detect contiguous active runs (amp>1, consecutive days), track the min-OLR convection longitude; label a run "crossing" if convection advances from west of ~100E to east of ~150E, else "non-propagating". Probe the latent for this event-character label.
+   - **Life-cycle stage:** onset / mature / decay thirds within each run (3-class). Probe.
+   - **R-K structural asymmetry** (Sec 7, Fig 22): per-day u850 westerly/easterly ratio; regress the latent for it.
+5. (light) variance partition; **cross-latent CKA deferred** (SSL-first per user; aux2d/aux3d/NSV/Barlow added via a LATENTS dict later).
+
+**Predictions:** amplitude + convection-longitude probes high; ENSO decodable; phase modest (esp. linear); month ~chance; power spectrum shows envelope/intraseasonal (not a clean single 45-d line); event-character (MC-crossing) possibly decodable -> would be a real finding (the net learned MJO *event character*, not phase).
+
+**Data contract:** SSL embeddings `results/ssl/embeddings.npy` (bp axis, 2-D); `labels_aligned_mjo_bp20_90.csv` (phase/amp/ENSO/weak/date); `X_MJO_bp20_90` (ch1 OLR -> convection longitude, ch0 u850 -> R-K); own-RMM mapped to the bp axis by date; Nino3.4 if available. Output: `MJO/moisture_constraints/results/latent_content/`. Notebook: `33_mjo_latent_content.ipynb`, SSL-nb15 primary via a LATENTS dict.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
