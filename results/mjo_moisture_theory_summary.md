@@ -122,6 +122,8 @@ Probing the frozen latents — linear+MLP probes, direction-regression, latent p
 
 This also resolves the earlier puzzles: the SSL angle ≠ phase (it captures only one wind quadrature component, not the EOF sin/cos pair), and the high ENSO *displacement*-z with low ENSO *classifiability* (ENSO modulates the wind structure these latents capture).
 
+**Direct confirmation against the operational index (nb34).** Reconstructing the **RMM index** itself from the Barlow latents — decomposed into amplitude vs phase, with linear *and* MLP probes — quantifies the "invariance → slow envelope" claim against the canonical MJO index: **phase is not recovered at all** (circular corr ≈ 0, 8-sector accuracy at chance ~0.12, mean angular error ~90°), and the **MLP fails too** while recovering the own-RMM-self ceiling perfectly (circ-corr 1.0) — so phase is genuinely *absent*, not merely nonlinearly hidden. **Amplitude is partially recovered** and scales with capacity (Barlow-D7 ~17–21% of envelope variance via MLP, D3 ~6%). Identical under the official BoM RMM target → robust. So the invariance objective keeps a *fraction of the RMM amplitude envelope and none of its phase clock*.
+
 ---
 
 ## Artifacts

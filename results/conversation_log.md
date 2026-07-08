@@ -5082,7 +5082,26 @@ NSV wins phase (0.46, ~4x chance), wind-recon (0.53, 3x SSL), R-K (0.58), and re
 - amp-R2 > 0 AND phase-circ-corr ~ 0 (8-class ~0.125, ang-err ~90 deg) -> confirms & quantifies the split: Barlow = RMM amplitude envelope, not the phase clock.
 - MLP phase-circ-corr > ~0.4 -> phase was nonlinearly hidden -> revise §8.
 
-**Artifacts.** `notebooks/mjo/34_mjo_barlow_rmm_reconstruction.ipynb`; `MJO/moisture_constraints/results/barlow_rmm/rmm_reconstruction.csv` + 2 PNGs; short results summary; this log entry. Status: PLAN approved; notebook build pending.
+**Artifacts.** `notebooks/mjo/34_mjo_barlow_rmm_reconstruction.ipynb`; `MJO/moisture_constraints/results/barlow_rmm/` (`rmm_reconstruction.csv`, `rmm_reconstruction_bom.csv`, `barlow_rmm_bars.png`, `barlow_rmm_trajectory.png`, `barlow_rmm_amp_scatter.png`, `barlow_rmm_summary.json`). Commit 868e4c2 (nb34).
+
+**RESULTS (own-RMM target, val=2085 active days).**
+
+| latent | probe | amp_R2 | phase_circ_corr | 8sec_acc | ang_err |
+|---|---|---|---|---|---|
+| own-RMM (ceiling) | MLP | 0.999 | 1.00 | 0.99 | 0.4 deg |
+| Barlow-D3 | linear | 0.072 | -0.047 | 0.103 | 93.5 deg |
+| Barlow-D3 | mlp | 0.063 | 0.008 | 0.134 | 90.0 deg |
+| Barlow-D7 | linear | 0.189 | -0.043 | 0.122 | 93.5 deg |
+| Barlow-D7 | mlp | 0.171 | -0.134 | 0.156 | 82.2 deg |
+
+Official BoM target ~identical (D7 amp 0.21, phase circ-corr ~0) -> robust to which RMM.
+
+**CONFIRMED (quantified sec 8 against the operational index):**
+- **Phase: not encoded, and NOT merely linearly hidden.** circ-corr ~ 0 for all latents, 8-sector at chance (~0.12), angular error ~90 deg (random). The MLP fails too (D7 -0.13), yet MLP recovers the ceiling perfectly (own-RMM->own-phase circ-corr 1.0) -> the probe CAN extract phase when present, so Barlow genuinely lacks the phase clock. Trajectory fig: true RMM = clean color-ordered ring; Barlow reconstruction = phase-scrambled blob; predicted-vs-true angle = uniform cloud.
+- **Amplitude: partially encoded, scales with capacity.** D7 explains ~17-21% of amplitude-envelope variance (MLP), D3 only ~6%. Envelope is present but modest.
+- Caveat: LINEAR amp_R2 is a weak metric (A=sqrt(RMM1^2+RMM2^2) is nonlinear -> even true PCs give linear ceiling -0.02); MLP amp numbers are the fair ones (MLP ceiling 0.999 validates).
+
+**Verdict:** Barlow encodes a fraction of the RMM amplitude envelope and NONE of its phase -> direct confirmation of "invariance -> slow envelope", against the canonical index, robust own-RMM & BoM. Status: COMPLETE.
 
 ---
 
