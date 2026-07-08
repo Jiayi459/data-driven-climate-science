@@ -5055,6 +5055,35 @@ NSV wins phase (0.46, ~4x chance), wind-recon (0.53, 3x SSL), R-K (0.58), and re
 
 **Key reframing:** it is NOT that neural nets can't see convection — the CONTRASTIVE objective discards it (doesn't need it); the PREDICTION objective (NSV) keeps it (must). **The training objective, not the architecture, decides what physics the latent encodes.** Investigation complete. Commit 15e94ee (NSV cell); summary doc `mjo_moisture_theory_summary.md` updated with the full table.
 
+## Session 59 — PLAN: reconstruct the RMM index from Barlow-Twins latents (phase/envelope decomposition) — nb34 (2026-07-08)
+
+**Purpose.** Quantify WHICH component of the operational MJO index (RMM) the invariance-trained Barlow latent captures, by reconstructing RMM and scoring its **amplitude** and **phase** parts SEPARATELY. Prior (Session 58 / summary §8): Barlow is phase-blind but holds a slow envelope -> expected **amplitude recoverable, phase ~ chance**. Restates §8 against the canonical, interpretable index (not raw fields), with a reconstructed-vs-true RMM trajectory figure as the new artifact.
+
+**Decisions locked (user, 2026-07-08):**
+- Purpose = quantify the phase/envelope split (not "challenge prior", not "build emulator").
+- Target scoring = **decompose** into amplitude + phase, scored separately.
+- Probe = **linear (Ridge) + nonlinear (MLP)** — MLP rules out "phase present but nonlinearly hidden".
+- Scope = **Barlow D3 + D7 only** (no SSL/NSV/aux comparison rows).
+- RMM source = **own-RMM primary + official BoM RMM as robustness check** (Both).
+
+**Latents.** Barlow-D3 (`barlow/D3/embeddings_z7.npy`), Barlow-D7 (`barlow/embeddings_z7.npy`). Non-latent references: phase **chance** (circ-corr~0, 8-class~0.125, ang-err~90 deg); amplitude **mean-predictor** (R2=0); **own-RMM-self ceiling** (RMM PCs reconstructing themselves ~1.0) to prove the pipeline.
+
+**Target.** own-RMM continuous PCs `(RMM1,RMM2)` from `mjo_rmm_own_pcs.npy`; decompose `A=sqrt(RMM1^2+RMM2^2)`, `theta=atan2(RMM2,RMM1)`. Official BoM RMM (from nb11 download) repeated for the headline numbers only.
+
+**Method (extends nb33 conventions).**
+1. **Date-align** Barlow embeddings (bp20-90 axis, `labels_aligned_mjo_bp20_90.csv`) to own-RMM PCs (nb30 axis, `labels_aligned_mjo.csv`) by date intersection — DIFFERENT axes, so this is the critical first step; assert overlap count. Restrict to active MJO days (amp>=1, ~weak). Year-based train/val split (every 5th year). Standardize latent on train only.
+2. **Phase probe:** fit latent -> `(cos theta, sin theta)` with Ridge and MLPRegressor; recover `theta_hat=atan2(sin_hat,cos_hat)`. Metrics: circular correlation, 8-class balanced accuracy (octant of theta_hat), mean abs angular error (deg).
+3. **Amplitude probe:** fit latent -> `A` with Ridge and MLP. Metric: R2.
+4. **Reconstructed index (for figure):** `(RMM1_hat,RMM2_hat)=A_hat*(cos theta_hat,sin theta_hat)`.
+
+**Outputs.** Table per latent x {linear,MLP}: `amp_R2 | phase_circ_corr | phase_8class_acc | mean_ang_err_deg`. Figures: (1) bar chart amp-R2 vs phase-circ-corr for D3/D7 (linear & MLP) with chance/ceiling lines; (2) phase-space true vs Barlow-reconstructed RMM (colored by true phase) — expect amplitude ring preserved, angle scrambled — plus theta_hat-vs-theta (diffuse) and A_hat-vs-A (positive trend) scatters.
+
+**Decision rule.**
+- amp-R2 > 0 AND phase-circ-corr ~ 0 (8-class ~0.125, ang-err ~90 deg) -> confirms & quantifies the split: Barlow = RMM amplitude envelope, not the phase clock.
+- MLP phase-circ-corr > ~0.4 -> phase was nonlinearly hidden -> revise §8.
+
+**Artifacts.** `notebooks/mjo/34_mjo_barlow_rmm_reconstruction.ipynb`; `MJO/moisture_constraints/results/barlow_rmm/rmm_reconstruction.csv` + 2 PNGs; short results summary; this log entry. Status: PLAN approved; notebook build pending.
+
 ---
 
 *Log maintained by Claude Code. Updated each session.*
