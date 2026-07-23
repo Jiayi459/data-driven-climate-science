@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(try { $nb = Get-Content 'notebooks/nsv/18c_nsv_bsiso_stage1_lag10.ipynb' -Raw -Encoding UTF8 | ConvertFrom-Json; $md = \\($nb.cells | Where-Object { $_.cell_type -eq 'markdown' }\\).Count; $code = \\($nb.cells | Where-Object { $_.cell_type -eq 'code' }\\).Count; Write-Output \"OK: $\\($nb.cells.Count\\) cells = $md md + $code code\" } catch { Write-Output \"JSON FAILED: $\\($_.Exception.Message\\)\" })",
+      "Bash(GIT_AUTHOR_NAME=\"Jiayi459\" GIT_AUTHOR_EMAIL=\"jh9141@nyu.edu\" GIT_COMMITTER_NAME=\"Jiayi459\" GIT_COMMITTER_EMAIL=\"jh9141@nyu.edu\" git add notebooks/nsv/18c_nsv_bsiso_stage1_lag10.ipynb)",
+      "Bash(git -c user.name=Jiayi459 -c user.email=jh9141@nyu.edu commit -m ' *)",
+      "Bash(GIT_AUTHOR_NAME=\"Jiayi459\" GIT_AUTHOR_EMAIL=\"jh9141@nyu.edu\" GIT_COMMITTER_NAME=\"Jiayi459\" GIT_COMMITTER_EMAIL=\"jh9141@nyu.edu\" git add notebooks/nsv/19_nsv_bsiso_id_estimation.ipynb notebooks/nsv/20_nsv_bsiso_refine_analysis.ipynb results/conversation_log.md)",
+      "PowerShell(try { $nb = Get-Content 'notebooks/nsv/20_nsv_bsiso_refine_analysis.ipynb' -Raw -Encoding UTF8 | ConvertFrom-Json; $md = \\($nb.cells | Where-Object { $_.cell_type -eq 'markdown' }\\).Count; $code = \\($nb.cells | Where-Object { $_.cell_type -eq 'code' }\\).Count; Write-Output \"OK: $\\($nb.cells.Count\\) cells = $md md + $code code\" } catch { Write-Output \"FAIL: $\\($_.Exception.Message\\)\" })",
+      "Bash(GIT_AUTHOR_NAME=\"Jiayi459\" GIT_AUTHOR_EMAIL=\"jh9141@nyu.edu\" GIT_COMMITTER_NAME=\"Jiayi459\" GIT_COMMITTER_EMAIL=\"jh9141@nyu.edu\" git add notebooks/nsv/20_nsv_bsiso_refine_analysis.ipynb)",
+      "PowerShell(try { $nb = Get-Content 'notebooks/nsv/21_nsv_mjo_data_stage1.ipynb' -Raw -Encoding UTF8 | ConvertFrom-Json; $md = \\($nb.cells | Where-Object { $_.cell_type -eq 'markdown' }\\).Count; $code = \\($nb.cells | Where-Object { $_.cell_type -eq 'code' }\\).Count; Write-Output \"OK: $\\($nb.cells.Count\\) cells = $md md + $code code\" } catch { Write-Output \"FAIL: $\\($_.Exception.Message\\)\" })",
+      "Bash(GIT_AUTHOR_NAME=\"Jiayi459\" GIT_AUTHOR_EMAIL=\"jh9141@nyu.edu\" GIT_COMMITTER_NAME=\"Jiayi459\" GIT_COMMITTER_EMAIL=\"jh9141@nyu.edu\" git add notebooks/nsv/21_nsv_mjo_data_stage1.ipynb)",
+      "PowerShell(try { $nb = Get-Content 'notebooks/nsv/22_nsv_mjo_id_estimation.ipynb' -Raw -Encoding UTF8 | ConvertFrom-Json; $md = \\($nb.cells | Where-Object { $_.cell_type -eq 'markdown' }\\).Count; $code = \\($nb.cells | Where-Object { $_.cell_type -eq 'code' }\\).Count; Write-Output \"OK: $\\($nb.cells.Count\\) cells = $md md + $code code\" } catch { Write-Output \"FAIL: $\\($_.Exception.Message\\)\" })",
+      "Bash(GIT_AUTHOR_NAME=\"Jiayi459\" GIT_AUTHOR_EMAIL=\"jh9141@nyu.edu\" GIT_COMMITTER_NAME=\"Jiayi459\" GIT_COMMITTER_EMAIL=\"jh9141@nyu.edu\" git add notebooks/nsv/22_nsv_mjo_id_estimation.ipynb)",
+      "PowerShell(try { $nb = Get-Content 'notebooks/nsv/23_nsv_mjo_refine_analysis.ipynb' -Raw -Encoding UTF8 | ConvertFrom-Json; $md = \\($nb.cells | Where-Object { $_.cell_type -eq 'markdown' }\\).Count; $code = \\($nb.cells | Where-Object { $_.cell_type -eq 'code' }\\).Count; Write-Output \"OK: $\\($nb.cells.Count\\) cells = $md md + $code code\" } catch { Write-Output \"FAIL: $\\($_.Exception.Message\\)\" })",
+      "Bash(GIT_AUTHOR_NAME=\"Jiayi459\" GIT_AUTHOR_EMAIL=\"jh9141@nyu.edu\" GIT_COMMITTER_NAME=\"Jiayi459\" GIT_COMMITTER_EMAIL=\"jh9141@nyu.edu\" git add notebooks/nsv/23_nsv_mjo_refine_analysis.ipynb)",
+      "Bash(PYTHONIOENCODING=utf-8 /c/Users/haoji/AppData/Roaming/uv/python/cpython-3.14.5-windows-x86_64-none/python.exe -X utf8 -c ' *)",
+      "Bash(wc -l /tmp/nb01b_src.txt)",
+      "Bash(grep -nE 'OLR|os.path.exists|cdsapi|for year|client.retrieve|skip|.nc.*format' /tmp/nb01b_src.txt)",
+      "PowerShell(try { $nb = Get-Content 'notebooks/diagnostic_drive_check.ipynb' -Raw -Encoding UTF8 | ConvertFrom-Json; $md = \\($nb.cells | Where-Object { $_.cell_type -eq 'markdown' }\\).Count; $code = \\($nb.cells | Where-Object { $_.cell_type -eq 'code' }\\).Count; Write-Output \"OK: $\\($nb.cells.Count\\) cells = $md md + $code code\" } catch { Write-Output \"FAIL: $\\($_.Exception.Message\\)\" })",
+      "Bash(GIT_AUTHOR_NAME=\"Jiayi459\" GIT_AUTHOR_EMAIL=\"jh9141@nyu.edu\" GIT_COMMITTER_NAME=\"Jiayi459\" GIT_COMMITTER_EMAIL=\"jh9141@nyu.edu\" git add notebooks/diagnostic_drive_check.ipynb)",
+      "WebFetch(domain:proceedings.mlr.press)",
+      "WebFetch(domain:ar5iv.labs.arxiv.org)",
+      "Bash(git -c user.name=Jiayi -c user.email=jh9141@nyu.edu commit -m ' *)",
+      "WebFetch(domain:www.bom.gov.au)",
+      "WebFetch(domain:journals.ametsoc.org)",
+      "Bash(python -c \"import json,sys; nb=json.load\\(open\\('notebooks/mjo/24_mjo_rmm_pca_from_daily.ipynb',encoding='utf-8'\\)\\); print\\('cells:',len\\(nb['cells']\\)\\); print\\('types:',[c['cell_type'] for c in nb['cells']]\\); [compile\\(''.join\\(c['source']\\),'<c>','exec'\\) for c in nb['cells'] if c['cell_type']=='code']; print\\('all code cells compile OK'\\)\")",
+      "Bash(ls -la ~/Desktop/DDCS/fig24/ 2>/dev/null || ls -la /c/Users/haoji/Desktop/DDCS/fig24/ 2>/dev/null || find /c/Users/haoji/Desktop -maxdepth 3 -iname \"fig24*\" 2>/dev/null)",
+      "Read(//c/Users/haoji/Desktop/**)",
+      "Bash(unzip -o fig24.zip -d fig24_extracted)",
+      "Bash(python -c \"import json; nb=json.load\\(open\\('notebooks/mjo/13_mjo_preprocessing.ipynb',encoding='utf-8'\\)\\); c=[x for x in nb['cells'] if x.get\\('id'\\)=='verify-hovmoller'][0]; compile\\(''.join\\(c['source']\\),'<c>','exec'\\); print\\('verify-hovmoller compiles OK; total cells:',len\\(nb['cells']\\)\\)\")",
+      "Bash(git -c user.name=\"Jiayi\" -c user.email=\"jh9141@nyu.edu\" pull --rebase origin main)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import json; nb=json.load\\(open\\('notebooks/mjo/12_mjo_era5_download.ipynb',encoding='utf-8'\\)\\); c=[x for x in nb['cells'] if x.get\\('id'\\)=='verify'][0]; compile\\(''.join\\(c['source']\\),'<verify>','exec'\\); print\\('verify cell compiles OK'\\)\")",
+      "Read(//c/Users/haoji/Downloads/**)",
+      "Bash(git checkout *)",
+      "Bash(GIT_EDITOR=true git -c user.name=\"Jiayi\" -c user.email=\"jh9141@nyu.edu\" rebase --continue)"
+    ]
+  }
+}
