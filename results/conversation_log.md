@@ -5105,4 +5105,147 @@ Official BoM target ~identical (D7 amp 0.21, phase circ-corr ~0) -> robust to wh
 
 ---
 
+## Session 61 — PLAN: ENSO marginal-histogram scatter (EN vs LN means) for sup + SSL, BSISO + MJO (2026-08-26)
+
+**Status: PLAN ONLY — awaiting user approval before any notebook is edited.**
+
+### Motivation (user request, 2026-08-26)
+
+Reference: https://www.r-bloggers.com/2011/06/example-8-41-scatterplot-with-marginal-histograms/
+
+The "By ENSO" panel in every 2-D representation figure is an overplotted cloud of ~900 red/grey/blue points; whether El Nino and La Nina days actually sit in different parts of the latent space cannot be judged by eye. Request: add **marginal histograms** to that scatter — one histogram for El Nino, one for La Nina, on each latent axis — "to see if their means pop out different". Applies to **supervised and SSL, for both BSISO and MJO**.
+
+This is the *visual* counterpart to the ENSO-displacement z-score cells already in these notebooks (which condition on phase and report only a scalar). The new figure shows the distributions the z-score summarizes.
+
+### Figures to add (per notebook)
+
+**Fig 1 — `enso_marginal_hist.png`** (r-bloggers joint layout, `GridSpec(2, 2, width_ratios=[4,1], height_ratios=[1,4])`):
+- centre: val-set scatter, El Nino red `^`, La Nina blue `s`, Neutral light grey `o` at alpha 0.12 as background context (existing `enso_palette` / `enso_marker` dicts reused verbatim)
+- top: z1 histograms, El Nino vs La Nina, **density-normalised** (n_EN != n_LN), step-filled, vertical dashed line at each group mean
+- right: z2 histograms, same, `orientation='horizontal'`, shared axis limits with the scatter
+- annotation box: n_EN, n_LN, dmean, Cohen's d, and the year-block bootstrap 95% CI (below)
+
+**Fig 2 — `enso_marginal_polar.png`** (1x2): radius histogram (EN vs LN) and angle histogram (EN vs LN, 24 bins on [-pi, pi]).
+Rationale: these embeddings are rings — `r` ~ oscillation amplitude, `theta` ~ phase clock — so (r, theta) are the physically meaningful marginals, while z1/z2 mix the two. **nb07 is L2-normalised (unit circle, `F.normalize` in `CNNEncoder`), so r == 1 by construction and its z1/z2 marginals are U-shaped artefacts** — for nb07 only the angle panel carries information, and the figure title will say so.
+
+### Statistics — doing "do the means pop out" honestly
+
+1. **Naive tests (reported, but labelled naive):** Welch t on z1, z2, r; permutation test on the circular mean of theta.
+2. **The independence problem (this is the part that matters).** `enso_category` is a *per-year* JJA Nino-3.4 label, so every day in a year shares it, and the intraseasonal fields have decorrelation time tau_e ~ 15-25 d (Session 25). The independent unit is the **year** (~10 EN years vs ~10 LN years), not the ~900 days. A day-level t-test would be overconfident by roughly sqrt(n_days/n_years) ~ 10x. Headline uncertainty is therefore a **year-block bootstrap**: resample EN-years and LN-years with replacement (5000 draws), recompute dmean, report 2.5/97.5 pct; plus a **year-label permutation p** (shuffle the ENSO category across years, 5000 draws).
+3. **Phase-conditioned residual version.** Subtract the per-phase (8-bin) mean of z1, z2 before histogramming, so any EN-LN mean difference cannot be an artefact of EN and LN years sampling BSISO/RMM phases unequally. Plotted as dashed overlay curves on the same marginals; same bootstrap applied. This is the quantity the existing per-phase displacement z-score is built on.
+
+### Code changes — exactly four notebooks, purely additive
+
+Insertion is **2 new cells** (markdown header + one code cell, ~130 lines) placed immediately after the existing ENSO scatter cell; no existing cell is modified.
+
+| Notebook | Insert after (cell id) | Insert before | Variables consumed | RESULTS_DIR |
+|---|---|---|---|---|
+| `notebooks/extension_2d/07_supervised_2d.ipynb` | idx 27 `scatter-val` | idx 28 `cell14-header` | `Z_val_2d`, `labels_val`, `bsiso_phase`, `enso_category`, `date` | `.../results/lee_2d` |
+| `notebooks/extension_2d/08_ssl_temporal_2d.ipynb` | idx 20 `scatter` | idx 21 `cell11-header` | `Z_val`, `lv` (from `labels_bp`) | `.../results/lee_2d_ssl_v2` |
+| `notebooks/mjo/14_mjo_supervised_2d.ipynb` | idx 16 `extract-and-scatter` | idx 17 `cell9-header` | `Z_val`, `lv_a` (active-MJO subset), `phase`, `amplitude` | `{MJO_DIR}/results/sup` |
+| `notebooks/mjo/15_mjo_ssl_temporal_2d.ipynb` | idx 20 `scatter` | idx 21 `cell11-header` | `Z_val`, `lv_a` | `{MJO_DIR}/results/ssl` |
+
+The code cell is **self-contained and duplicated verbatim** across all four (project convention: notebooks run standalone on Colab, nothing is imported from `src/`, which is empty apart from `.gitkeep`). Only a 5-line adapter header differs per notebook:
+
+```python
+Z, lab   = Z_val, lv_a            # nb07: Z_val_2d, labels_val
+PHASE_COL   = 'phase'             # nb07/nb08: 'bsiso_phase'
+UNIT_CIRCLE = False               # nb07: True  (L2-normalised -> radius panel meaningless)
+TITLE       = 'MJO SSL Temporal 2D'
+```
+
+Plus a **standalone fallback**: if `Z` is not in scope the cell loads `np.load(f'{RESULTS_DIR}/embeddings.npy')` (saved by all four notebooks) and re-derives the val subset from the saved indices, so the figure can be regenerated without re-training.
+
+Shared helper defined inside the cell: `enso_marginal_figure(Z, lab, phase_col, unit_circle, title, outdir)` -> writes both PNGs and returns the stats DataFrame.
+
+### Outputs per notebook RESULTS_DIR
+
+- `enso_marginal_hist.png`, `enso_marginal_polar.png`
+- `enso_marginal_stats.csv` — rows = {z1, z2, r, theta} x {raw, phase-residual}; cols = `mean_EN, mean_LN, delta, cohens_d, n_EN_days, n_LN_days, n_EN_years, n_LN_years, p_naive, boot_lo, boot_hi, p_perm_year`
+
+### How to read the result (predictions)
+
+- **nb08 (BSISO SSL, displacement z = 11.0):** expect a visible shift, but probably clearer in the phase-residual overlay than in the raw marginals, since the raw marginals pool over all 8 phases and the ENSO effect is a per-phase displacement (partly cancelling in the pool).
+- **nb07 (BSISO sup):** unit circle -> read the angle panel only.
+- **nb14 (MJO sup, z = 12.2):** radius panel is the one to watch — radius already correlates with RMM amplitude (r = 0.50, Session 24).
+- **nb15 (MJO SSL):** must be read next to the month-ANOVA F = 300 confound (Session 24). An EN-LN mean separation here can partly be seasonal sampling (EN and LN peak in different calendar windows); the year-block bootstrap does not remove that — flag it in the figure caption.
+- **Null expectation:** if the year-block CI for dmean straddles 0 in all panels, the honest statement is "the group means are not separable at the year level" even where a day-level t-test gives p < 1e-6.
+
+### Cost / risk
+
+Trivial: no GPU, no retraining, < 5 s per notebook; 5000-draw bootstrap on ~900 points is < 1 s. Purely additive cells, existing figures and numbers unchanged.
+
+### Decisions locked (user, 2026-08-26)
+
+1. **Both raw and phase-conditioned marginals are produced, as two SEPARATE figures** — not a dashed overlay as first proposed. Reason: phase-residual histograms are centred on 0 by construction, so drawing them on the same axis as the raw marginals (which are not centred) would invite a false visual comparison. So: `enso_marginal_hist.png` (raw) and `enso_marginal_residual.png` (per-phase mean removed), identical joint layout.
+   - **Raw** answers: *is the latent cloud as a whole shifted between EN and LN?* This mixes two effects — (i) EN/LN occupy different positions within a phase, and (ii) EN and LN years simply spend different amounts of time in each phase (an occurrence/duration difference).
+   - **Residual** answers: *within a given BSISO/RMM phase, does El Nino displace the state?* This is the numerator of the existing displacement z-score and the actual "ENSO modulates ISO structure" claim.
+   - Why both are needed: the two can disagree in either direction. Raw can be ~0 while the per-phase displacement is large (z=11 in nb08), because displacements at opposite points of the ring point in opposite directions and cancel when pooled. Conversely raw can be large purely from phase-occupancy imbalance with zero within-phase displacement. Reading them together identifies which of the two mechanisms is operating.
+2. **Neutral is included as background**: grey `o`, alpha 0.12 in the scatter; thin unfilled grey step curve in the marginals for reference. All statistics remain EN vs LN only.
+3. **No retraining required — the cell is a pure plotting cell.** Verified: in all four notebooks `val_idx` is derived from the labels dates alone (`val_years = all_years[::5]`), and the embeddings are already persisted (`{RESULTS_DIR}/embeddings.npy` in nb08/14/15; `emb_path = f'{RESULTS_DIR}/embeddings.npy'` with `RUN_TAG='2d_lee'` in nb07). `labels_bp` is likewise persisted to `{PROCESSED_DIR}/{LABELS_BP_FILE}` by the bandpass cells of nb08/nb15. So the new cell runs after only Cell 1 (mount) + a labels read: it loads the labels CSV, loads `embeddings.npy`, recomputes `val_idx` in three lines, and never touches `X`, `X_bp`, the model, or the GPU. If the in-memory variables happen to exist it uses them instead.
+
+### IMPLEMENTED (2026-08-26) — cells written, not yet run on Colab
+
+Two cells (markdown header + one ~275-line code cell) inserted in each of the four
+notebooks, immediately after the existing ENSO scatter. Existing cells untouched.
+
+| Notebook | New cell | Cell id | TAG |
+|---|---|---|---|
+| `extension_2d/07_supervised_2d.ipynb` | Cell 13b (idx 28-29) | `enso-marg-bsiso-sup` | `bsiso_sup` |
+| `extension_2d/08_ssl_temporal_2d.ipynb` | Cell 10b (idx 21-22) | `enso-marg-bsiso-ssl` | `bsiso_ssl` |
+| `mjo/14_mjo_supervised_2d.ipynb` | Cell 8b (idx 17-18) | `enso-marg-mjo-sup` | `mjo_sup` |
+| `mjo/15_mjo_ssl_temporal_2d.ipynb` | Cell 10b (idx 21-22) | `enso-marg-mjo-ssl` | `mjo_ssl` |
+
+**Five things changed from the approved plan, all found by testing the cell on
+synthetic data with a known injected signal (EN radius +0.25):**
+
+1. **`SCOPE = 'all'` is the default, not val-only.** The val split is every 5th
+   year, which leaves only **2 El Nino and 3 La Nina YEARS**. Since the year is the
+   independent unit, the year-permutation p then has a hard floor of
+   1/C(5,2) = 0.10 — it cannot report significance at all. `SCOPE='all'` uses every
+   day (13 EN / 12 LN years), which is also what the existing ENSO-displacement
+   cells already do, so the figure and the z-score now describe the same sample.
+   The cell prints the year counts and the p-floor, and warns when the floor > 0.02.
+   `SCOPE='val'` remains available. The two supervised notebooks carry an inline
+   NOTE that under `SCOPE='all'` their training years are in-sample (pairs were
+   ENSO-conditioned), so the SSL notebooks are the contamination-free comparison.
+2. **Raw and residual are separate figures**, not a dashed overlay (residual
+   histograms are centred on 0 by construction — overlaying invites a false read).
+3. **Circular bootstrap CI must be centred on the observed value.** Taking raw
+   percentiles of wrapped angles gave a nonsense interval spanning the whole circle
+   ([-3.00, +2.96] rad for a delta of -2.83). Now `obs + pct(wrap(boot - obs))`.
+4. **Angular mean is flagged when ill-defined.** For a near-uniform ring the
+   circular mean of theta is meaningless; the cell computes the resultant length R
+   and prints a NOTE ("read theta_resid, not theta_raw") when min(R_EN, R_LN) < 0.1.
+   The mean line drawn on the angle histogram is the circular mean, not the linear one.
+5. **Three-tier input loading** so the cell never needs a retrain: in-memory
+   `embeddings_2d` -> `{RESULTS_DIR}/embeddings.npy` -> `{PERSIST_DIR}/{TAG}_marginal_inputs.npz`
+   (written by the cell itself). Tier 3 exists because nb15's Cell 1 wipes
+   `RESULTS_DIR` via `glob(f'{RESULTS_DIR}/*')`. Verified all three tiers return
+   bit-identical statistics.
+
+**Outputs** — written to both `{RESULTS_DIR}/` and a shared
+`{PROJECT_DIR}/results/enso_marginal/` (prefixed by TAG) so the four representations
+sit side by side: `enso_marginal_hist.png`, `enso_marginal_residual.png`,
+`enso_marginal_polar.png`, `enso_marginal_stats.csv`, `{TAG}_marginal_inputs.npz`.
+
+**Stats CSV columns:** `mean_EN, mean_LN, R_EN, R_LN, delta, cohens_d, sd_pooled,
+n_EN_days, n_LN_days, n_EN_years, n_LN_years, p_naive_day, boot_lo, boot_hi,
+p_perm_year` for rows `{z1, z2, r, theta} x {raw, resid}`.
+
+**Testing done locally** (no Colab): all four cells compile; executed against a mock
+Drive tree with synthetic ring embeddings under `SCOPE` = all / val / cache. The
+injected El Nino radius offset was recovered as `delta = +0.26, CI [+0.24, +0.28]`
+in the three non-normalised notebooks and correctly as `delta = 0.000` in nb07
+(unit circle -> radius degenerate, panel title turns red). No signal was invented on
+the axes where none was injected.
+
+**Not yet done:** run on Colab; record real numbers here.
+
+### Explicitly out of scope for this change (ask if wanted)
+
+`nb16`/`nb16b` three-way (RMM vs sup vs SSL) combined marginal figure; `nb14b`/`nb15b` lat16 variants; `nb26` Barlow-Twins D3/D7 latents; NSV notebooks.
+
+---
+
 *Log maintained by Claude Code. Updated each session.*
