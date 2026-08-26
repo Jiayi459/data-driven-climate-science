@@ -5242,6 +5242,30 @@ the axes where none was injected.
 
 **Not yet done:** run on Colab; record real numbers here.
 
+### Correction (user, 2026-08-26): the BSISO supervised cell belongs in nb07c, not nb07
+
+nb07 L2-normalises its output and was superseded: the canonical BSISO supervised
+result is **nb07c** (no L2 norm + VICReg collapse fix, tau=0.07, phase val 58.3%,
+z = 2.53 — Session 13b / 41). Putting the marginal figure only in nb07 meant the one
+supervised BSISO figure was the degenerate unit-circle case, where the radius panel
+is empty by construction.
+
+- Added the same two cells to `notebooks/extension_2d/07c_supervised_2d_no_l2norm.ipynb`
+  as **Cell 8b** (idx 17-18, ids `enso-marg-hdr-bsiso_sup` / `enso-marg-bsiso_sup`),
+  after the existing `extract-and-scatter` cell. `UNIT_CIRCLE = False`,
+  `RESULTS_DIR = results/lee_2d_no_l2_v2`, labels `labels_aligned_mjjas_lee.csv`,
+  same every-5th-year split rule, embeddings already saved to `{RESULTS_DIR}/embeddings.npy`.
+- **nb07c now owns `TAG = 'bsiso_sup'`** in the shared `results/enso_marginal/` dir.
+  nb07's cell was retagged to `bsiso_sup_l2norm` (avoids a filename collision) and its
+  header now says it is superseded and only the angle panel is informative there.
+  nb07's cell is kept for reference; removing it is a one-cell delete if wanted.
+- Verified the same way: cell compiles, runs against a mock Drive tree, recovers the
+  injected El Nino radius offset (`delta = +0.246, CI [+0.229, +0.263]`) which nb07
+  structurally cannot show.
+
+Four representations now write to `results/enso_marginal/`: `bsiso_sup` (07c),
+`bsiso_ssl` (08), `mjo_sup` (14), `mjo_ssl` (15), plus `bsiso_sup_l2norm` (07).
+
 ### Explicitly out of scope for this change (ask if wanted)
 
 `nb16`/`nb16b` three-way (RMM vs sup vs SSL) combined marginal figure; `nb14b`/`nb15b` lat16 variants; `nb26` Barlow-Twins D3/D7 latents; NSV notebooks.
