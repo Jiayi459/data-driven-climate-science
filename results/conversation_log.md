@@ -5547,6 +5547,19 @@ restorable at drive.google.com -> Trash (30-day window). Otherwise nb15 needs a 
 re-run; the bandpassed input `X_MJO_bp20_90.npy` lives in PROCESSED_DIR, which is NOT
 wiped, so the cost is the ~30-45 min training, not the filtering.
 
+**Follow-up (same session): Cell 9r recovery cell added to nb15.** The guard stops
+further damage but does not bring the deleted files back, so the user hit the new
+message next. Added `Cell 9r` (ids `recover-hdr` / `recover-embeddings`, inserted
+after the `extract` cell) which (a) prints an inventory of CHECKPOINT_DIR,
+RESULTS_DIR, PROCESSED_DIR and results/enso_marginal so it is visible what actually
+survived, and (b) if any `encoder_mjo_ssl_*.pth` is still there, reloads it
+(`_final.pth`, else the highest `_epoch_N.pth`), re-extracts from the CACHED
+`X_MJO_bp20_90.npy` (~1 min, no Lanczos recompute) and writes `embeddings.npy` back,
+leaving `embeddings_2d` / `labels_bp` in memory so Cell 10b hits tier 1. Needs only
+Cell 1 and Cell 6. If no checkpoint survived it prints the two remaining options.
+Note Cell 1's wipe also globbed `encoder_{RUN_TAG}_*.pth`, so the checkpoint was
+probably deleted too — Drive Trash is the likely route.
+
 **Lesson:** a self-written cache cannot protect the first run. The tier order is
 right, but the real fix had to be upstream — a setup cell must not delete artifacts
 that later cells depend on.
