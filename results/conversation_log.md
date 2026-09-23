@@ -5506,4 +5506,51 @@ Log location: the AGENTS.md Desktop path does not exist in this environment; thi
 - Illustrative null calculation: four years, two with phase-specific latent mean +1 and two with -1, two EN and two LN years. If the observed labels separate the signs, D_obs = 2. There are six equally likely EN-year pairs, and two yield distance 2, so the exact upper-tail year-permutation p is 2/6 = 1/3. Many repeated days per year do not convert four independent annual offsets into hundreds of independent offsets. This is an analytical toy, not a project result.
 - D_obs is useful descriptive magnitude and should accompany inference. Alone it cannot distinguish systematic ENSO association from a chance alignment of a few annual offsets, and it depends on latent scale, dimension and sampling variability. Cross-representation comparison needs matched dates, phase bins and a stated normalization; whitening addresses linear scaling but does not remove dimensional effects. Suggested reporting: normalized observed distance, year-block uncertainty, EN/LN year counts and empirical year-permutation p. No notebook changes or experiment reruns requested or performed.
 
+## Session 63 — nb15 Cell 10b crash: Cell 1's stale-clear deletes its own inputs (2026-09-23)
+
+**Symptom.** nb15 Cell 10b (ENSO marginal histograms) raised
+`NameError: embeddings_2d` -> `FileNotFoundError: .../results/enso_marginal/mjo_ssl_marginal_inputs.npz`.
+All three input tiers missed at once.
+
+**Cause.** nb15 Cell 1 ends with
+
+```python
+stale = (glob(f'{CHECKPOINT_DIR}/encoder_{RUN_TAG}_*.pth') +
+         glob(f'{CHECKPOINT_DIR}/training_history_{RUN_TAG}.json') +
+         glob(f'{RESULTS_DIR}/*'))          # <- deletes embeddings.npy AND the checkpoint
+```
+
+On a fresh runtime the user ran Cell 1 and jumped to Cell 10b. Cell 1 had just
+deleted `MJO/results/ssl/embeddings.npy` (tier 2) and the trained checkpoint, and
+tier 3's npz cache did not exist because Cell 10b had never completed a run. Tier 1
+was empty because the runtime was new. The three-tier loader was designed for
+exactly this notebook's wipe, but tier 3 is written by Cell 10b itself, so it cannot
+help on the FIRST run after a wipe. No copy of the MJO SSL embeddings exists
+elsewhere in the repo: nb16, nb30, nb31, nb33 and nb35 all READ
+`MJO/results/ssl/embeddings.npy` and none of them copies it.
+
+**Fixes (commit ddf098c).**
+
+1. **The destructive wipe is now opt-in** in the three notebooks that had it —
+   `15_mjo_ssl_temporal_2d`, `15b_mjo_ssl_temporal_2d_lat16`, `08_ssl_temporal_2d`.
+   New `CLEAR_STALE = False` flag in Cell 1; the glob still runs so the count is
+   reported, but nothing is deleted unless the flag is set. Re-running Cell 1 on a
+   fresh runtime is now safe. nb08 had the same trap for `bsiso_ssl`.
+2. **Tier 3 now fails with instructions, not a bare traceback**, in all five
+   marginal cells (07, 07c, 08, 14, 15): it names both paths it looked for, the cause,
+   and the two ways out (restore from Google Drive Trash, or re-run with
+   CLEAR_STALE=False).
+
+**Recovery for the user's Drive.** Deletes through the Colab Drive mount land in
+Drive Trash, so `embeddings.npy` and `encoder_mjo_ssl_final.pth` are very likely
+restorable at drive.google.com -> Trash (30-day window). Otherwise nb15 needs a full
+re-run; the bandpassed input `X_MJO_bp20_90.npy` lives in PROCESSED_DIR, which is NOT
+wiped, so the cost is the ~30-45 min training, not the filtering.
+
+**Lesson:** a self-written cache cannot protect the first run. The tier order is
+right, but the real fix had to be upstream — a setup cell must not delete artifacts
+that later cells depend on.
+
+---
+
 *Log maintained by Claude Code and Codex. Updated each session.*
