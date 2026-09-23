@@ -5272,4 +5272,238 @@ Four representations now write to `results/enso_marginal/`: `bsiso_sup` (07c),
 
 ---
 
-*Log maintained by Claude Code. Updated each session.*
+## 2026-09-09 — Barlow Twins loss formula checked against nb26 code
+
+User asked to locate the Barlow Twins loss and express it mathematically, including the remembered time-decay term. Verified `barlow_cross_corr`, `barlow_loss`, `sched`, and the training loop in `notebooks/mjo/26_mjo_barlow_twins.ipynb`.
+
+- Each optimizer step sums the losses for tau = 1, 2, 3, 4, 5 (no division by five): `L = sum_tau s(tau) * [sum_i (1-C_ii(tau))^2 + 0.005 * sum_{i!=j} C_ij(tau)^2]`.
+- Current executable schedule: `s(tau) = 0.05 ** ((tau-1)/4)` (`SCHED_MODE='exp'`), applied to BOTH invariance and redundancy terms; this is a shared lag-dependent weight, not an additional additive penalty or epoch-dependent decay.
+- `C = zA_normalized.T @ zB_normalized / B`, with each view centered and divided by its per-dimension batch standard deviation plus `1e-5`. Current `PROJ_DIM=3`; earlier runs used 7.
+- The opening markdown still describes the original linear schedule `1 - 0.125*(tau-1)` (1.0 to 0.5). Distinguished this historical setting from the current code; no notebook changes or training performed.
+- The configured desktop log path `/Users/haojiayi/Desktop/ddcs/conversation_log.md` and its parent directory are absent, so this entry is recorded in the existing repository conversation log.
+- Follow-up: user requested an English version of the loss, temporal weighting function, and numerical values. Provided the summed Barlow Twins objective, definitions of both terms and the cross-correlation matrix, and the current exponential weights `{1: 1.0000, 2: 0.4729, 3: 0.2236, 4: 0.1057, 5: 0.0500}` with off-diagonal coefficient `0.005`.
+
+---
+
+## Session 62 — DISCUSSION: ENSO displacement test on the BSISO / MJO index itself (2026-09-23)
+
+**Status: DISCUSSION ONLY — no notebook edited.**
+
+**User request:** run the ENSO displacement test on the BSISO and MJO indices so the index z-score can be compared with supervised, SSL and NSV (intrinsic-dimension) z-scores. Question: which encoder should map index dates into a 2-D latent space — plain PCA, or something else?
+
+**Recommendation — no new encoder; the index IS a 2-D linear encoder.**
+- RMM1/RMM2 and BSISO1-1/BSISO1-2 are projections of the fields onto the leading multivariate EOF pair, so `emb = (PC1, PC2)` is the embedding. nb16 already did this for RMM (`emb_rmm = [rmm1, rmm2]`, z = 4.10).
+- Do NOT use t-SNE / UMAP / Isomap: they do not preserve distances, so EN-LN centroid norms are meaningless there. Kernel PCA or a new CNN would give a different representation, no longer "the index".
+- Two linear variants (answer different questions):
+  1. **Official index PCs** (BoM RMM; APEC BSISO1). nb02 reads `pc1_bsiso1, pc2_bsiso1` from the APEC file but drops them before writing labels.csv -> need to re-save.
+  2. **Own-EOF on the same ERA5 daily fields the nets see** (MJO: `mjo_rmm_own_pcs.npy` from nb24 exists; BSISO: SVD top-2 of the Lee-preprocessed OLR+u850 input, ~10 lines). Controls for data source, so the only difference from sup/SSL is "linear top-2 EOF vs learned nonlinear 2-D".
+  3. Optional: PCA top-2 on the exact SSL input (e.g. `X_MJO_bp20_90`) = "does the nonlinear encoder add anything beyond linear compression of the same input".
+
+**Bigger issue — the existing z-scores are not comparable yet.** Must unify before adding the index row:
+1. **Same dates** (intersection across reps). z grows ~sqrt(N) at fixed effect; BSISO NSV used 3,162 samples (lag10 axis), nb08 all MJJAS days, MJO SSL the trimmed bp20-90 axis.
+2. **Same phase binning** = official index phase for every rep. Only convention that works for NSV (4-D/7-D, no own angle) and makes the day groups identical, so only geometry differs. For the index, own-sector = index phase. nb16 own-sector version kept as secondary.
+   - Scientific note: in index space, within-phase displacement is confined to radius (amplitude) + a 45 deg wedge (phase preference), so the index can only express ENSO modulation as amplitude/phase-speed change.
+3. **Same active-day filter**: MJO (nb16/nb23) uses amp >= 1; BSISO (nb08/nb20) uses all days. Weak index days sit near the origin with random phase. Recommend amp >= 1 headline, all-days secondary.
+4. **Year-level null** (headline). The current null shuffles days independently, but the ENSO label is per-year and latents are autocorrelated -> null too narrow, z inflated, and inflated MORE for slow latents (SSL month confound, Barlow). The index is the fastest-varying rep, so the day-shuffle null penalizes it relative to others; part of RMM 4.1 vs SSL 13.4 may be this. Reuse the year-permutation code from the Session 61 marginal cells. Keep day-level z for continuity.
+5. **Dimension/scale**: z is invariant to isotropic scaling only; NSV is 4-D/7-D vs 2-D. Standardize each dim for all reps; report obs/null ratio alongside z; flag D in the table.
+- Also state in the write-up: index preprocessing removes interannual variability by design (WH04 / Lee 2013 120-day mean removal), so a low index z is partly expected.
+
+**Proposed implementation:** one new CPU-only notebook (e.g. `nb35_enso_displacement_unified.ipynb`) that loads all saved embeddings + labels, date-intersects, and runs one shared function with both nulls, for BSISO {index, own-EOF, sup nb07c, SSL nb08, NSV v} and MJO {BoM RMM, own-RMM, sup nb14, SSL nb15, NSV v, optional Barlow}. No retraining.
+
+✓ DECIDED (user, 2026-09-23): (a) both official index PCs AND own-EOF; (b) year-level null is the headline, day-level kept for continuity; (c) amp >= 1 for both BSISO and MJO; (d) one unified notebook. See Session 62b.
+
+---
+
+## Session 62b — Inventory of every existing ENSO-displacement z-score + its configuration (2026-09-23)
+
+User request: put all existing z-scores and their configurations in one table in the log, before nb35 recomputes them on a unified footing. Values below are copied from the sessions cited; configurations were read from the displacement cell of each notebook (not from memory).
+
+**Shared by ALL rows below (the legacy test):** statistic = mean over phases 1-8 of ||centroid(EN) - centroid(LN)|| in the representation's raw units (no standardisation); a phase is skipped if it has < 3 EN or < 3 LN days; null = ENSO labels shuffled **independently across days** (day-level); z = (obs - null_mean) / null_sd; train + val days pooled.
+
+### BSISO (MJJAS or July; ENSO label = JJA Nino-3.4 category, one label per year)
+
+| # | Representation | NB | D | Data vintage / input | Days used | N | Phase bins | Perms | ENSO used in training? | **z** | Session | Note |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| B1 | 64-D sup, Approach A | nb04/05 | 64 | snapshot, July | all | 1,333 | APEC phase | 100 | yes (pairs) | **11.02** | S7 | random split |
+| B2 | 64-D sup, Approach B (bg removed) | nb04/05 | 64 | snapshot, July | all | 1,333 | APEC | 100 | yes | **9.85** | S8 | |
+| B3 | 64-D sup, Lee preproc | nb04/05 | 64 | snapshot, July | all | 1,333 | APEC | 100 | yes | **10.82** | S9 | |
+| B4 | 64-D sup, Lee MJJAS (DOY clim) | nb04/05 | 64 | snapshot, MJJAS | all | 6,579 | APEC | 100 | yes | **4.79** | S10 | annual-cycle bug |
+| B5 | 64-D sup, Lee MJJAS (3-harmonic fix), random split | nb04/05 | 64 | snapshot, MJJAS | all | 6,579 | APEC | 100 | yes | **2.60** | S11 | |
+| B6 | 64-D sup, Lee MJJAS, year split | nb04/05 | 64 | snapshot, MJJAS | all | 6,579 | APEC | 100 | yes | **3.83** | S11 | "definitive" 64-D baseline |
+| B7 | 2-D sup, L2-norm, tau 0.07 | nb07 | 2 | snapshot, MJJAS | all | 6,579 | APEC | 100 | yes | **1.54** | S13 | collapsed crescent |
+| B8 | 2-D sup, L2-norm, tau 0.5 | nb07b | 2 | snapshot, MJJAS | all | 6,579 | APEC | 100 | yes | **2.59** | S13 | |
+| B9 | 2-D sup, no-L2, tau 0.5, 128-layer | nb07c | 2 | snapshot, MJJAS | all | 6,579 | APEC | 100 | yes | **2.53** | S13b | the "sup 2-D" number in all docs; tau 0.5 = collapse regime (S39/41) |
+| B10 | 2-D sup, no-L2, 32-layer | nb07c v2 | 2 | snapshot, MJJAS | all | 6,579 | APEC | 100 | yes | **3.76** | S14b | reverted |
+| B11 | 2-D sup, tau 0.07 + VICReg (fixed) | nb07c | 2 | daily-mean | all | 6,579 | APEC | 100 | yes | not logged | S47 | retrain required; result never recorded |
+| B12 | 2-D sup sweep, vicreg bs256 wd1e-3 | nb07d | 2 | daily-mean | all | 6,579 | APEC | 100 | yes | **6.56** | S39 | raw same settings 8.38; lr 3e-4 gives 9.8-11.2 |
+| B13 | 2-D sup sweep, locked recipe (vicreg bs64 tau 0.07) | nb07d | 2 | daily-mean | all | 6,579 | APEC | 100 | yes | **6.16** | S41 | bs64 raw 2.40; bs64 tau0.07 2.05 |
+| B14 | sup dim sweep d = 1/2/4/8/16/32/64 | nb07e | d | daily-mean | all | 6,579 | APEC | 100 | yes | **0.84 / 5.81 / 6.33 / 8.78 / 9.19 / 12.28 / 17.21** | S42 | z rises with D; 3-seed d2 5.45, d4 6.50 |
+| B15 | 2-D SSL, 128-layer | nb08 | 2 | snapshot, lp25 | all | lp25 axis | APEC | 100 | no | **10.70** | S14c | month F 13.8 |
+| B16 | 2-D SSL, 32-layer (v2) | nb08 | 2 | snapshot, lp25 | all | lp25 axis | APEC | 100 | no | **14.55** | S14c | the "SSL 2-D" number in all docs (S61 plan's "11.0" is a mis-quote) |
+| B17 | NSV v-space | nb20 | 4 | snapshot, lp25 lag-10 | all | 3,999 (corrected S62c; nb20 header said 3,162) | APEC | 1000 | no | **12.50** | S32 | project_conclusions.md §7 lists 11.0 = inconsistent with S32 |
+| B18 | NSV Stage-1 z-space | nb20 | 64 | snapshot, lp25 lag-10 | all | 3,999 | APEC | 1000 | no | **10.80** | S32 | |
+| B19 | **APEC BSISO index itself** | — | 2 | — | — | — | — | — | — | **never computed** | — | nb35 fills this |
+
+### MJO (all seasons; ENSO label = MONTHLY Nino-3.4 category, can change within a year)
+
+| # | Representation | NB | D | Data vintage / input | Days used | N | Phase bins | Perms | ENSO used in training? | **z** | Session | Note |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| M1 | BoM RMM (rmm1, rmm2) | nb16 | 2 | BoM official | active (weak_mjo False) | active of 16,436 | RMM phase (= its own sectors) | 1000 | — | **4.10** | S24 | only index z ever computed |
+| M2 | 2-D sup | nb14 | 2 | snapshot, X_MJO | active | active of 16,436 | RMM phase | 100 | yes | **22.46** | S24 | |
+| M3 | 2-D sup (same embedding as M2) | nb16 | 2 | snapshot | active | active of 16,436 | own-angle octants | 1000 | yes | **12.21** | S24 | same embedding as M2; binning alone moves z 22.5 -> 12.2 |
+| M4 | 2-D SSL, bp20-90 | nb15 | 2 | snapshot, bp20-90 | active | active of 16,256 | RMM phase | 100 | no | **18.74** | S24 | month F 301 |
+| M5 | 2-D SSL (same embedding as M4) | nb16 | 2 | snapshot | active | active of 16,256 | own-angle octants | 1000 | no | **13.44** | S24 | |
+| M6 | 2-D sup, tau 0.07 + VICReg (fixed) | nb14 | 2 | ? | active | — | RMM phase | 100 | yes | not logged | S47 | |
+| M7 | 2-D sup, lat16 | nb14b | 2 | snapshot | active | — | RMM phase | 100 | yes | **19.82** | S27 | rank-1 collapse -> not trustworthy |
+| M8 | 2-D SSL, lat16 | nb15b | 2 | snapshot | active | — | RMM phase | 100 | no | **13.26** (S27) / **22.53** (S29 additive prefix) | S27/29 | month F 2888 / 2039 = seasonal contamination |
+| M9 | NSV v-space | nb23 | 7 | snapshot, bp20-90 lag-10 | active | — | RMM phase | 1000 | no | **20.88** | S33-35 | taken from chat output, never logged in detail |
+| M10 | Barlow Twins z7, linear tau-sched | nb26 | 7 | stale snapshot bp20-90 | active, amp >= 1 | — | RMM phase | 100 | no | **34.68** | S44 | slow-envelope latent |
+| M11 | Barlow Twins z7, steep tau-sched | nb26 | 7 | same | active, amp >= 1 | — | RMM phase | 100 | no | **33.99** | S45 | |
+| M12 | Barlow Twins D = 3 | nb26 | 3 | same | active, amp >= 1 | — | RMM phase | 100 | no | **27.51** | S46 | |
+| M13 | aux2d (SSL + moisture aux) | nb31 | 2 | daily-mean | active, amp >= 1, q finite | — | RMM phase | 200 | no | **19.4** | S53 | eff_rank 1.33 |
+| M14 | aux2d_rebal | nb31 | 2 | daily-mean | same | — | RMM phase | 200 | no | **18.5** | S54 | |
+| M15 | aux3d | nb32 | 3 | daily-mean | same | — | RMM phase | 200 | no | **13.3** | S54 | |
+| M16 | **own-RMM** (daily-mean EOF, nb24) | — | 2 | daily-mean | — | — | — | — | — | **never computed** | — | nb35 fills this |
+
+### Why these numbers cannot be ranked against each other as they stand
+
+1. **Different samples.** N runs from 1,333 (July) to about 16k (MJO). At a fixed effect size z grows roughly like sqrt(N). BSISO NSV uses 3,162 days, BSISO sup/SSL use 6,579 or the lp25 axis, and MJO SSL uses the trimmed bp20-90 axis.
+2. **Different day filters.** Every BSISO row uses all days. Every MJO row uses active days only.
+3. **Different phase bins.** nb16 bins by the representation's own angle; every other notebook bins by the index phase. The same embedding gives 22.46 vs 12.21 (M2 vs M3), so the binning choice alone moves z by 10.
+4. **The day-level null ignores that ENSO is a per-year (BSISO) or slowly varying monthly (MJO) label.** Latents are autocorrelated, so the null is too narrow and every z is inflated. Slow latents (Barlow, SSL with month confound, aux) are inflated the most. The fast-varying index is penalised relative to them.
+5. **Dimension.** z rises with D (nb07e: 0.84 at d=1 to 17.21 at d=64). The table mixes D = 2 to 64.
+6. **Raw units.** z is invariant only to isotropic rescaling, so anisotropic latents (e.g. the eff_rank 1.3 crescent) are measured differently from isotropic ones.
+7. **In-sample supervised z.** For the supervised rows, z is computed on training years whose pairs were built from the ENSO label.
+8. **Vintage.** The table mixes 12Z-snapshot and daily-mean inputs, and 100 to 1000 permutations (null sd noisy by about ±7% at 100).
+9. **Record inconsistencies found.** BSISO NSV is 12.50 in S32 but 11.0 in project_conclusions.md §7. nb08 SSL is 14.55 in S14c but "11.0" in the S61 plan.
+
+nb35 (Session 62b below) recomputes the core rows on one footing: same dates, index-phase bins, amp >= 1, whitened latent, year-level null (plus day-level for continuity), and the index rows B19 / M16.
+
+### nb35 built — `notebooks/35_enso_displacement_unified.ipynb` (written, tested on a mock Drive tree, NOT yet run on Colab)
+
+CPU only, no retraining; reads the saved embeddings. 20 cells:
+- **Cell 2, test function.** Same statistic as all earlier notebooks, computed with vectorised bincount. Three nulls:
+  - **day**: the legacy shuffle.
+  - **year** (headline): whole ENSO-year blocks are swapped, and each label keeps its calendar month. Blocks are calendar years for BSISO and June-May ENSO years for MJO, whose ENSO label is monthly. Only complete blocks are used.
+  - **shift** (robustness): cyclic shift of the ENSO-year sequence by k = 1 ... n-1 years. This keeps multi-year ENSO clustering.
+  - Also reported: `ratio` = obs / year-null mean (an effect size) and `slow_frac`, the share of variance in year-block means.
+- **Cell 3, synthetic self-test.** Checks that the nulls behave as intended.
+- **Cells 5-6, loaders.** Every representation is aligned **by date**. BSISO: APEC PC1/PC2 re-read from `data/raw/BSISO.INDEX.NORM.LY.data`; own-EOF = top-2 PCA of u850 + OLR of `X_MJJAS_lee.npy`, saved as `bsiso_own_pcs.npz`; sup nb07c, SSL nb08 (lp25 axis), NSV v 4-D. MJO: BoM `rmm1, rmm2`; own-RMM `mjo_rmm_own_pcs.npy`; sup nb14, SSL nb15 (bp axis), NSV v 7-D; extras Barlow D3/D7 and aux2d/aux2d_rebal/aux3d are marked † and do not shape the common-date set. Missing files are skipped, and the date of every file is printed.
+- **Cell 7, configurations:**
+
+| config | dates | units | bins |
+|---|---|---|---|
+| headline | common to all core representations | whitened | index phase |
+| native | each representation's own active days | whitened | index phase |
+| raw | common | raw units | index phase |
+| legacy | own days + original filter | raw units | index phase |
+| ownsector | common | whitened | own angle, 2-D latents only |
+
+  The legacy configuration should reproduce the logged z_day.
+- **Outputs** go to `results/enso_displacement_unified/`: `zscores_all.csv`, `zscores_headline.csv`, `per_phase_headline.csv`, `summary.md`, `enso_displacement_unified.png` (dumbbell of day-null vs year-null z per representation).
+
+**Validation on synthetic data (local, mock tree with the real file names, shapes and N, 2000 permutations, about 90 s end to end):**
+
+| synthetic latent | z_day | z_year | z_shift | reading |
+|---|---|---|---|---|
+| true within-phase EN/LN shift | 24.5 | 9.7 | 12.8 | detected |
+| no ENSO signal | -0.6 | -0.2 | -0.3 | correctly null |
+| season only | **27.6** | -1.4 | -1.4 | day-null false positive, removed by year null |
+| year-to-year drift only | **6.0** | -0.8 | -0.7 | day-null false positive, removed by year null |
+
+Other checks:
+- **Calibration, iid latents.** Year null gives p < 0.05 in 5% of 2-D no-signal runs.
+- **Calibration, extreme decadal random-walk latent with clustered ENSO years.** Day null: mean z = 28. Year swap: 30% false positives. Shift: 15%. No permutation null is exact for decadally drifting latents; `slow_frac` flags them, and for large `slow_frac` z_year should be read as an upper bound. The notebook text says this.
+- **Whitening trade-off.** Whitening makes z invariant to linear re-parametrisation: the mock aux2d, which is 0.3 x RMM, gives the same z as BoM RMM. But for D > 2 it gives low-variance noise dims equal weight. A 7-D mock NSV with its signal in 1 dim scored 11.6 raw vs 3.4 whitened. **Always read the NSV rows alongside the `raw` column.** Possible follow-up decision: whether NSV should be headlined raw or whitened once real numbers are in.
+
+Pushed to GitHub (main): commit 36bfe55, notebook only; this log entry not yet committed.
+
+> Next: user runs nb35 on Colab and sends back the Cell 3 / 5 / 6 / 8 printouts + the PNG. Then record the real headline table here and update project_conclusions.md §7 (also fix its BSISO NSV "11.0" -> 12.50 inconsistency).
+
+---
+
+## Session 62c — nb35 first Colab run: under the year-level null most of the old ENSO z-scores collapse (2026-09-23)
+
+User ran nb35 on Colab (N_PERM 2000). Self-test PASSED (A 9.66 / B -0.20 / C -1.36 / D -0.84 z_year, same as local).
+
+**Data loaded.**
+- **BSISO labels:** 6,579 days, 4,090 active, 43 complete years (1981-2023). Only **7 El Nino and 11 La Nina years**.
+- **APEC PCs:** phase recomputed from the PCs matches the labels on 100%.
+- **own-EOF (u850 + OLR):** EOF1-4 explain 6.2 / 4.1 / 3.6 / 3.0% (pair poorly separated from EOF3, unfiltered daily anomalies over 0-60N). Canonical correlation with APEC is 0.93 / 0.91.
+- **BSISO SSL nb08 is MISSING:** `results/lee_2d_ssl_v2/embeddings.npy` is not on Drive. Cause: nb08 Cell 1 deletes everything in `RESULTS_DIR` and the matching checkpoints (`stale_results = glob(...)`, `os.remove`). Running Cell 1 again without completing training erases the embeddings. **The BSISO SSL row (the old z = 14.55) is untested.**
+- **MJO:** 16,436 days, 10,177 active, 44 complete June-May ENSO years (1979-2022); all 10 representations loaded.
+- **File dates:** sup nb14 2026-06-24 (the tau 0.07 + VICReg retrain); sup nb07c 2026-06-23 (also the retrain, so not the logged tau 0.5 run); SSL nb15 2026-06-12; NSV MJO 2026-05-31; NSV BSISO 2026-06-10.
+
+**Common active days:** BSISO 2,491 (set by NSV's 3,999-day lag-10 axis); MJO 9,834.
+
+### Headline (common days, whitened, index-phase bins)
+
+| mode | representation | D | slow_frac | ratio | z_day (legacy null) | **z_year** | p_year | z_shift | p_shift |
+|---|---|---|---|---|---|---|---|---|---|
+| BSISO | APEC index | 2 | 0.095 | 0.92 | 3.32 | **-0.40** | 0.65 | -0.44 | 0.67 |
+| BSISO | own-EOF | 2 | 0.123 | 1.26 | 8.83 | **1.27** | 0.11 | 0.97 | 0.14 |
+| BSISO | sup 2-D nb07c (retrained) | 2 | 0.114 | 1.42 | 7.82 | **1.91** | 0.039 | 1.72 | 0.12 |
+| BSISO | NSV v 4-D | 4 | 0.165 | 1.27 | 13.42 | **1.77** | 0.052 | 1.91 | 0.093 |
+| MJO | BoM RMM | 2 | 0.012 | 0.75 | 2.32 | **-1.00** | 0.85 | -0.92 | 0.82 |
+| MJO | own-RMM | 2 | 0.017 | 1.40 | 10.19 | **1.74** | 0.052 | 1.04 | 0.14 |
+| MJO | sup 2-D nb14 | 2 | 0.018 | 2.90 | 24.38 | **8.71** | 0.0005 | 6.71 | 0.023 (floor) |
+| MJO | SSL 2-D nb15 | 2 | 0.045 | 2.21 | 21.94 | **5.01** | 0.0005 | 3.77 | 0.023 (floor) |
+| MJO | NSV v 7-D | 7 | 0.038 | 1.90 | 32.83 | **6.20** | 0.0005 | 5.14 | 0.023 (floor) |
+| MJO | Barlow D7 † | 7 | 0.184 | 1.48 | 32.80 | **2.71** | 0.0085 | 3.27 | 0.023 |
+| MJO | Barlow D3 † | 3 | 0.222 | 1.82 | 32.91 | **2.95** | 0.007 | 3.73 | 0.023 |
+| MJO | aux2d † | 2 | 0.068 | 1.84 | 18.65 | **2.93** | 0.011 | 2.10 | 0.068 |
+| MJO | aux2d_rebal † | 2 | 0.069 | 1.79 | 18.09 | **3.04** | 0.009 | 1.68 | 0.091 |
+| MJO | aux3d † | 3 | 0.054 | 1.65 | 19.46 | **2.85** | 0.009 | 1.88 | 0.068 |
+
+p_year floor = 1/2001; p_shift floor = 1/44.
+
+**Legacy check:** the loader reproduces the logged numbers where the file is unchanged. BSISO NSV z_day 12.0 vs 12.50 (on 3,999 days, not 3,162; inventory corrected); MJO NSV 22.1 vs 20.88; Barlow D7 32.7 vs 33.99; D3 30.2 vs 27.51; aux2d 19.3 vs 19.4; aux2d_rebal 18.3 vs 18.5; BoM RMM 3.16 vs 4.10. Retrained files differ as expected: nb07c 4.68 (logged 2.53 was the tau 0.5 model); nb14 24.5 vs 22.46; nb15 23.7 vs 18.74.
+
+### What it means
+
+1. **The day-level null inflated every old z-score, by 3 to 12 times.** The inflation tracks how slowly the latent varies (`slow_frac`): sup 2.8x (0.018), SSL 4.4x (0.045), NSV 5.3x (0.038), aux 6-7x (0.05-0.07), Barlow 11-12x (0.18-0.22). This is the mechanism predicted in Session 62 and in the self-test (case D). The earlier ranking "Barlow z = 34 > NSV 21 > SSL 19" was mostly a ranking of slowness.
+2. **BSISO: no representation, index or learned, shows ENSO displacement that survives the year-level null.** All z_year are at most 1.9. Best p is 0.039 (sup), which is not robust to the shift null (0.12) or to four comparisons. The same holds on each representation's own days (native: APEC 0.45, own-EOF 0.79, sup 0.65). This is a low-power setting (7 EN / 11 LN years, ratio at most 1.4), so the correct reading is "not detectable at the year level", not "absent". SSL nb08 still needs to be tested.
+3. **MJO: three label-light or label-free latents keep a robust signal.** sup 8.7, NSV 6.2 and SSL 5.0 are all at the p floor for both the swap and the shift null, with effect ratios 1.9-2.9.
+   - The official **BoM RMM index shows none** (z_year -1.0, ratio 0.75).
+   - **own-RMM** is marginal (1.7). A plausible reason: WH04/BoM regress out the ENSO-related component and nb13 did not (120-day mean removal only). The same pattern appears in BSISO: own-EOF 1.3 vs APEC -0.4.
+   - sup was trained with ENSO-conditioned pairs on these same years (in-sample), so **SSL nb15 (5.0) and NSV (6.2) are the clean evidence**: label-free latents carry within-phase ENSO displacement that the RMM plane does not.
+4. **The MJO SSL seasonal-confound worry (month F = 300, Session 24) is largely answered.** The year null keeps each label's calendar month, and self-test case C shows a season-only latent scores -1.4. SSL still scores 5.0, so its ENSO signal is not just seasonal sampling.
+5. **Barlow and aux latents drop to about 3.** Their shift-null p is 0.02-0.09 and Barlow has the highest slow_frac, so their z_year is an upper bound. Invariance-SSL's "strongest ENSO capture" does not hold up.
+6. **Configuration sensitivity is small** except in two places. Own-sector binning roughly halves the learned MJO z (sup 3.8, SSL 2.0). For MJO NSV, whitening *raises* z (6.2 vs raw 3.4), the opposite of the synthetic 7-D concern.
+7. **Per phase (MJO):** the learned latents' displacement ratios are about 2-3.7 in phases 1-6 and 8 and about 1 in phase 7 for sup and SSL.
+
+**Claims in project_conclusions.md that no longer hold as written:** BSISO sup 2.53, BSISO NSV 12.5 (or 11.0), MJO SSL 18.74 and NSV 20.9 are all day-null numbers. Year-null replacements: BSISO NSV 1.8 (n.s.); MJO SSL 5.0, NSV 6.2, sup 8.7; Barlow about 2.7-2.9 (upper bound). BSISO SSL 14.55 is untested.
+
+> Next: (1) re-run nb08 end to end (training; do not re-run Cell 1 afterwards) so the BSISO SSL row can be tested; (2) re-run nb35; (3) then update project_conclusions.md §0/§2/§7 with year-null numbers (awaiting user OK).
+
+### nb08 re-run (for nb35): Cell 12 probe bug fixed (2026-09-23)
+
+The user re-ran nb08 (training done; `embeddings.npy` saved by Cell 9). **Cell 12 (probes) crashed** at `classification_report` with "Mix of label input types (string and number)".
+- **Cause:** `y_tr` / `y_va` held the BSISO phase labels (int), then were overwritten by the ENSO labels (str). The final phase `classification_report(y_va, clf.predict(...))` therefore compared ENSO strings with phase predictions.
+- **Fix:** the two label sets now have separate names, `y_tr_ph / y_va_ph` and `y_tr_en / y_va_en`. Only this cell changed. Tested on mock labels.
+- **Metrics printed before the crash:** BSISO phase val 31.0%, 5-fold CV 28.3 ± 2.0%; ENSO bal-acc val 40.3%, 5-fold 30.7 ± 12.0%. These are consistent with S14c (31.8% / 26.2%). `linear_probe_results.json` was not written; it will be written when the cell is re-run.
+- **Reminder:** do NOT re-run nb08 Cell 1 (it deletes `results/lee_2d_ssl_v2/*`). Re-run Cell 12 onward, then nb35.
+
+---
+
+### Clarification — why the ENSO null must preserve temporal blocks (2026-09-23)
+
+User asked for an explanation of the Session 62 recommendation to use year permutations instead of daily label permutations. Reviewed nb35 and the existing run at `/Users/haojiayi/Downloads/enso_displacement_unified/summary.md`; no experiments rerun or notebook code changed.
+
+- The observed phase-conditioned EN–LN centroid displacement stays fixed. A permutation null estimates the displacement expected from chance label alignment. Daily label shuffling splits correlated runs among categories, usually understating chance variability and exaggerating standardized evidence. The null mean can change as well as its standard deviation.
+- Whole-year label reassignment preserves within-year temporal structure. For BSISO, each sampled day in a calendar year receives the same permuted JJA category. MJO labels are monthly: nb35 instead swaps complete June–May label sequences, matching calendar months; MJO is not assigned one constant category per year.
+- A slowly varying latent can receive more inflation from daily shuffling, so historical RMM 4.10 versus SSL 13.44 cannot be read as a ratio of physical ENSO effect sizes. Slowness alone does not determine inflation. In the current common-date run, MJO SSL changes from z_day 21.9 to z_year 5.01, Barlow D7 from 32.8 to 2.71, and BoM RMM from 2.32 to -1.00. These are current paired comparisons, not replacements computed on the exact historical configurations.
+- `p_perm_year` in Session 61 is a permutation p-value for its marginal statistic. Reuse the label-permutation mechanism, then recompute the displacement statistic for each draw; do not transplant that p-value to a different statistic. Prefer empirical p-values to assuming the permutation z is Gaussian. A negative displacement z means the observed nonnegative distance is below the null mean, not a reversed ENSO effect.
+- Year permutations require appropriate exchangeability across years; multi-year dependence and long-term drift still need sensitivity checks. Block permutation does not by itself establish causality or remove every seasonal confound.
+- Primary methodological reference: Winkler et al. (2015), *Multi-level block permutation*, https://pubmed.ncbi.nlm.nih.gov/26074200/ . Interpretation only; no full statistical audit or reproducibility claim.
+
+Log location: the AGENTS.md Desktop path does not exist in this environment; this entry updates the existing project log open in the user's IDE.
+
+### Follow-up — whether year permutations are random, and whether D_obs alone suffices (2026-09-23)
+
+- Clarified that a common annual ENSO label does not imply identical daily atmospheric states or a compact full-year latent cluster. Relevant dependence can arise from nearby days or year-specific offsets within the same phase. Whole-year permutation often increases the null mean/spread relative to daily shuffling in this setting, but does not guarantee a larger distance in every draw or every dataset.
+- Ordinary random permutation does not deliberately force each year to receive a different category, reject correct matches, or optimize centroid separation. Fixed points and category-preserving exchanges are allowed. It samples label alignments under the null, conditional on the permitted block structure and category counts; it does not claim the reassigned labels are the historical truth.
+- Illustrative null calculation: four years, two with phase-specific latent mean +1 and two with -1, two EN and two LN years. If the observed labels separate the signs, D_obs = 2. There are six equally likely EN-year pairs, and two yield distance 2, so the exact upper-tail year-permutation p is 2/6 = 1/3. Many repeated days per year do not convert four independent annual offsets into hundreds of independent offsets. This is an analytical toy, not a project result.
+- D_obs is useful descriptive magnitude and should accompany inference. Alone it cannot distinguish systematic ENSO association from a chance alignment of a few annual offsets, and it depends on latent scale, dimension and sampling variability. Cross-representation comparison needs matched dates, phase bins and a stated normalization; whitening addresses linear scaling but does not remove dimensional effects. Suggested reporting: normalized observed distance, year-block uncertainty, EN/LN year counts and empirical year-permutation p. No notebook changes or experiment reruns requested or performed.
+
+*Log maintained by Claude Code and Codex. Updated each session.*
