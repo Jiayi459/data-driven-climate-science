@@ -5564,6 +5564,101 @@ probably deleted too — Drive Trash is the likely route.
 right, but the real fix had to be upstream — a setup cell must not delete artifacts
 that later cells depend on.
 
+### nb35 Cell 9 change lost to a Colab save, restored (2026-09-23)
+
+- **Symptom:** the user's figure still had no day-level labels.
+- **Cause:** commit 7848853 ("使用 Colab 创建而成", 19:23) saved a Colab copy of nb35 that had been opened before 0772a4b (19:21). It reverted Cell 9 (code + markdown). No other cell changed.
+- **Fix:** re-applied Cell 9 on top of the Colab version, keeping its saved outputs and metadata. Commit 28429be, pushed.
+- **Lesson:** after a push, reopen the notebook in Colab from GitHub before running or saving; an older open copy overwrites newer commits when saved.
+
+### Q: what is the significance baseline of the ENSO displacement? (2026-09-23)
+
+- **Answer:** the baseline is the permutation null distribution of D. The ENSO labels are reassigned so that they carry no information about the latent; days, latent and phase bins stay fixed. "Chance level" = mean of that distribution. p = share of null draws >= D_obs.
+- **It is > 0 by construction:** two noisy centroids are never identical. Its size grows with D and with how few *independent* samples there are.
+- **Day and year baselines give very different chance levels.** The day shuffle treats every day as independent. The year swap treats the ENSO year as the unit, which is correct because the label is per year (BSISO) or persists for months (MJO). Examples:
+
+| representation | D_obs | day-null mean (sd) | year-null mean (sd) |
+|---|---|---|---|
+| BSISO SSL | 0.575 | 0.174 (0.034) | 0.426 (0.100) |
+| MJO SSL | 0.440 | 0.084 (0.016) | 0.199 (0.048) |
+| BoM RMM | 0.052 | 0.036 (0.007) | 0.069 (0.017) |
+
+- **Reading:** the year baseline is 2-2.5x the day baseline, and wider. The slower the latent, the bigger the gap.
+
+### Q: what is the dashed line in the nb35 figure / what z counts as significant? (2026-09-23)
+
+- **The dashed line is z = 2.** This is the project's rule-of-thumb threshold since Session 7 ("z > 2 = significant"); it is not a computed critical value.
+- **Why z = 2 is not exact:** under a normal null, z = 2 means one-sided p = 0.023, and p = 0.05 would be z = 1.645. But the null of a mean of distances is right-skewed. The nb35 permutation p is larger than the normal approximation at every z; for example, z = 2.93 (aux2d) has permutation p = 0.011 vs normal 0.0017.
+- **Decision should use the permutation p** (p_year < 0.05, checked against p_shift and against the number of tests), not a z cut-off.
+- **Follow-up: is "2 SD above the null mean" statistically significant by itself? No.** Converting z to p needs the null shape. Normal gives p = 0.023; with no assumption, Cantelli bounds only p <= 1/(1 + k^2) = 0.20 at k = 2. Significance = permutation p < alpha, under a valid null (the day null is invalid, so its z > 2 means nothing), with alpha fixed in advance and a correction for multiple tests. Counter-example in the data: BSISO sup has z = 1.91 < 2 yet p_year = 0.039 < 0.05.
+
+### PLAN (no code yet): seed-sensitivity of the year-level null in nb35 (2026-09-23)
+
+User wants to re-draw the year-level null under different random seeds, save every run's null, and plot z with an error interval. Code not modified yet.
+
+**Where the randomness enters:**
+- `c1-setup` L23: `SEED = 42`.
+- `c2-funcs`:
+  - L25: `displacement_test(..., seed=SEED)`. The default is captured when Cell 2 runs, so editing SEED alone does nothing unless Cell 2 is re-run.
+  - L27: `rng = np.random.default_rng(seed)`.
+  - L32-33: the day null draws first and the year null second (`table[rng.permutation(nb)[block], slot]`), from the SAME rng.
+  - The shift null is deterministic (all cyclic shifts), so it will not vary with the seed.
+- `c7-run` L41: `displacement_test(...)` is called without a seed, so the default is used.
+
+**What varies with the seed:** only which 2000 of the possible year permutations are drawn (Monte-Carlo sampling of the null). D_obs does not change.
+
+**Expected size of the variation (Monte-Carlo error, 2000 draws):** SE of the null mean = sd/sqrt(2000), about 0.022 sd. Relative SE of the null sd is about 1.6%. So z should vary by roughly ±(0.02 + 0.016·|z|): about ±0.05 at z = 1.5 and about ±0.16 at z = 8.7. The results are expected to be seed-robust.
+
+**Separate question, not addressed by seeds:** how much the result depends on WHICH ENSO years happen to be in the record. That needs a year bootstrap or a leave-one-year-out jackknife, which also changes D_obs.
+
+**Needed changes (pending user go-ahead):**
+- `displacement_test` must return the raw null draws; currently only the mean, sd and per-phase means are kept.
+- A seed loop (headline config, year null only) that saves nulls[mode, rep] with shape (n_seeds, n_perm) to an npz.
+- z per seed, and a z interval plot.
+
+---
+
+### Q: what changes with the permutation seed, and what do error bars mean? (2026-09-28)
+
+User requested explanation, not implementation. Read nb35 `c2-funcs` / `c7-run`; no notebook edits or experiment runs. Statistical interpretation only (ANALYZED, not a reproducibility re-run).
+
+- Each year-null draw keeps embeddings, dates and phase bins fixed and reassigns whole ENSO label-table rows among year blocks, retaining the month slot. It recomputes the mean of valid per-phase EN/LN centroid distances under this reassignment. The observed distance uses the original labels and stays fixed across seeds.
+- With n complete blocks there are n! permutations of block identities (44! only when n = 44). These are not necessarily distinct category assignments or distances: identical label rows produce duplicates. A constant annual three-category example has n!/(n_EN! n_LN! n_Neutral!) distinct label assignments. Each run draws 2000 permutations; batches may overlap and repeated assignments are allowed. The exhaustive null distribution stays fixed; its Monte Carlo approximation changes with the seed.
+- For seed s, compute null mean mu_s, null SD sigma_s, then z_s = (D_obs - mu_s)/(sigma_s + 1e-12), matching the notebook. Null SD describes variation among shuffled statistics; variation among z_s describes the numerical uncertainty of estimating the null from a finite number of draws. Neither measures training-seed variation.
+- Distinguish (1) null quantiles, a reference range under shuffled labels; (2) across-seed z spread, conditional Monte Carlo variability for the same data and model; (3) year-block bootstrap uncertainty, which changes the sampled years while retaining each year's real data-label pairing and addresses record-sampling uncertainty, subject to the resampling assumptions.
+- Proposed descriptive seed plot: show all 20 seed z values and mean +/- one sample SD, s_z = sqrt(sum((z_s - mean(z))^2)/(S-1)); label explicitly as SD across permutation seeds, 2000 permutations/seed. This is not a 95% CI. Min-max only describes observed extremes and depends on the number of seeds. Empirical 2.5%-97.5% quantiles describe a central seed range, but 20 seeds give poor tail resolution. These choices are recommendations, not user-approved implementation decisions.
+- Dividing s_z by sqrt(S) instead estimates the SE of the mean across independent seed runs; it does not represent the spread of one 2000-permutation run. Pooling all null draws estimates the same null more precisely and need not give exactly mean(z_s).
+- Correction to the earlier plan: the 0.022-null-SD error for the null mean is the usual 1/sqrt(2000) Monte Carlo SE approximation. The 1.6% relative error of the null SD assumes approximately normal draws. The earlier +/- (0.02 + 0.016*abs(z)) expression was a heuristic, not a calibrated confidence interval or a guarantee of seed robustness; actual null skewness affects SD and z uncertainty.
+- For a year-bootstrap percentile interval, resample whole data-label year blocks with replacement and recompute a specified statistic on each resample, then take 2.5% and 97.5% quantiles. If the target is z rather than D_obs, recompute its corresponding null within each resample. Year dependence and fixed-versus-retrained representation determine what uncertainty is included. Leave-one-year-out is initially an influence diagnostic; its min-max is not automatically a 95% CI. For nonnegative distances, an ordinary percentile interval excluding zero is not by itself evidence of a significant displacement; use the justified permutation test, not an error bar crossing z = 2.
+
+Primary references consulted: SciPy permutation_test documentation (https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.permutation_test.html), SciPy bootstrap documentation (https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.bootstrap.html), NIST standard-deviation confidence limits (https://www.itl.nist.gov/div898/software/dataplot/refman1/auxillar/sdconfli.htm), NIST confidence limits for the mean (https://www.itl.nist.gov/div898/handbook/eda/section3/eda352.htm).
+
+Logging: the configured `~/Desktop/ddcs/conversation_log.md` was absent; this explanation was recorded in the existing repository log instead, preserving its pre-existing edits.
+
+---
+
+### Q: what does "2000 permutations" mean? (2026-09-28)
+
+Explained using four hypothetical years: one permutation randomly reassigns the entire set of year-level ENSO labels (label-table rows in the actual code), keeps the atmospheric data and phase bins fixed, and computes one shuffled displacement. Repeating this procedure 2000 times gives 2000 null-distance draws, with duplicate arrangements or values allowed. The seed determines the sequence of random arrangements. No code changes or experiment runs.
+
+### nb35 Cells 10-11 built: seed sensitivity of the year-level null (2026-09-28)
+
+User choices: 20 seeds; show every seed's z plus the mean and mean ± 1 SD.
+
+**Code changes:**
+- **Cell 2:** `displacement_test(..., nulls=('day','year','shift'))` can skip nulls and returns the raw draws as `draws_<name>` (NaN kept). The default call is unchanged. **Regression check on the mock tree: the old and new notebooks give identical zscores_all.csv (max abs diff 0.0)**, so all reported numbers stand.
+- **Cell 7:** the results row now excludes the `draws_` keys.
+- **Cell 9:** labels restored. The Colab save 9644bbb had again reverted them from a stale copy; the user's new legend names ('day-level null' / 'year-level null') were kept.
+- **New Cell 10:** seeds 0-19, headline inputs, year null only (`nulls=('year',)`).
+  - Saves `nulls_year_by_seed.npz` (raw nulls: n_reps × 20 × 2000, plus labels / seeds / obs), `z_year_by_seed.csv` and `z_year_seed_summary.csv` (z mean, SD, min, max, p_min, p_max, reported z).
+  - Cell 7's reported z (seed 42, day null drawn first) is an independent extra draw and is shown for reference.
+- **New Cell 11:** `z_year_seed_sensitivity.png`. Left: every seed's z with the mean and ±1 SD, beside the reported z and the z = 2 line. Right: deviation from the seed mean on a zoomed axis.
+
+**Mock test (2000 perms):**
+- The seed loop took 146 s locally (roughly 3-6 min expected on Colab).
+- The SD of z across seeds was 0.02-0.04 for |z| < 4 and 0.25-0.36 for z of 12-16, close to the predicted ±(0.02 + 0.016·|z|).
+- The p range across seeds for a borderline case (p about 0.03) was 0.029-0.043. **Borderline BSISO sup (real p = 0.039) is the case to watch: its p may cross 0.05 on some seeds.**
+
 ---
 
 *Log maintained by Claude Code and Codex. Updated each session.*
