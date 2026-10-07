@@ -5878,6 +5878,46 @@ Sources: WH04 author-uploaded article (https://www.researchgate.net/publication/
 
 > Next: user runs nb36 → nb37 → nb38 → nb35 (Cells 1-8, then 12) and sends back the nb37 / nb38 validation tables, the nb38 Cell 6 crosstab and the Cell 12 ladder.
 
+## Session 66 — First ladder results: why the RMM reproductions show more ENSO displacement than the official RMM (2026-10-07)
+
+### nb35 Cell 12 on Colab (MJO 9708 ladder days)
+
+| step | z_year | ratio | p_year | z_day |
+|---|---|---|---|---|
+| R0 BoM official | -0.90 | 0.77 | 0.81 | 2.6 |
+| R2 WH04 repro, no SST1 (NOAA + NCEP R1) | 0.48 | 1.11 | 0.30 | 6.9 |
+| R3 WH04 method on ERA5 | 2.14 | 1.43 | 0.025 (p_shift 0.068) | 9.0 |
+| R4 own-RMM | 1.77 | 1.41 | 0.052 | 9.7 |
+
+- R2's r with the official RMM over 1979-2001 is 0.964 / 0.982.
+- **B1 is missing:** `bsiso_lee_repro.npz` was not found, so nb38 has not been run yet. BSISO: B0 -0.40, B3 1.27 (as in nb35).
+
+### Reading
+
+1. **"Higher z" is not "a better index".** WH04 remove the ENSO-linear signal on purpose, so that ENSO's mean state is not read as an MJO phase. The official RMM sitting at chance level (ratio 0.77) is the intended behaviour. Extra displacement in a no-SST1 index can be ENSO's slow, phase-independent signal leaking into the MJO plane. That would make it a worse MJO index, not evidence of more ENSO modulation.
+2. **None of the index rows is strongly significant.** R2 is at chance level. The learned latents are far larger (sup 8.7, NSV 6.2, SSL 5.0).
+3. **R0 vs R2 differences:**
+   - (a) **SST1 regression:** official 1979-2013 only. This is the prime suspect.
+   - (b) **Official winds from 2014:** ACCESS, Gottschalck method.
+   - (c) **EOFs:** the official ones were fitted on SST1-removed fields.
+   - (d) **Data versions:** the PSL OLR file was last modified 2025-03.
+   - (e) **Minor method details.**
+   - r = 0.964 / 0.982 (< 0.99) fits (a) + (c) + (d).
+4. **The biggest single jump is R2 -> R3:** same method and EOF period, different data (NOAA OLR / NCEP R1 -> ERA5), z 0.48 -> 2.14. ERA5's OLR is a model radiative flux, not a satellite observation. R3 -> R4 (EOF period, grid) is small (2.14 -> 1.77).
+
+### Implemented (nb35; existing outputs kept)
+
+**Cells 10-11:** the seed-sensitivity analysis and figure now also cover R2 and R3, marked † and evaluated on the common days up to 2022-12-31 (the Cell 12 days). Their reference z is the Cell 12 value.
+
+**Cell 12b, ladder diagnostics:**
+- **(1) Period split, 1979-2013 vs 2014-2022.** The official RMM has SST1 in the first period and not in the second.
+- **(2) ENSO-linear removal in PC space.** This is an SST1 stand-in: per calendar month, regress each PC on monthly Nino-3.4 minus its previous-120-day mean.
+  - **The removal is redone inside every year-null draw with that draw's ENSO years.** A naive version biased z by about -2 on a no-signal mock.
+  - **Calibration:** 40 ENSO-free AR(1) latents with year offsets gave a mean z of -0.03 (plain) and +0.06 (removed), a mean difference of +0.09. Unbiased.
+- **Output:** `index_ladder_diagnostics.csv`.
+
+> Next: user runs nb38 (B1), then nb35 Cells 10-12b; sends nb37's Cell 5 tables (r per period, canonical, explained variance), the Cell 12 ladder and both Cell 12b tables.
+
 ---
 
 *Log maintained by Claude Code and Codex. Updated each session.*
