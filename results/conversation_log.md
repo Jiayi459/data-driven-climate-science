@@ -5659,6 +5659,225 @@ User choices: 20 seeds; show every seed's z plus the mean and mean ± 1 SD.
 - The SD of z across seeds was 0.02-0.04 for |z| < 4 and 0.25-0.36 for z of 12-16, close to the predicted ±(0.02 + 0.016·|z|).
 - The p range across seeds for a borderline case (p about 0.03) was 0.029-0.043. **Borderline BSISO sup (real p = 0.039) is the case to watch: its p may cross 0.05 on some seeds.**
 
+### nb35 Cell 10-11 results (real data): the year-level null is seed-robust (2026-09-28)
+
+20 seeds × 2000 perms, headline inputs; the loop took 219 s on Colab.
+
+| mode | rep | z mean ± SD over seeds | z range | p_year range | reported z (seed 42) |
+|---|---|---|---|---|---|
+| BSISO | APEC index | -0.41 ± 0.02 | -0.45 .. -0.38 | 0.63-0.67 | -0.40 |
+| BSISO | own-EOF | 1.23 ± 0.03 | 1.16 .. 1.28 | 0.10-0.13 | 1.27 |
+| BSISO | sup 2-D | 1.99 ± 0.05 | 1.90 .. 2.08 | **0.024-0.044** | 1.91 |
+| BSISO | SSL 2-D | 1.50 ± 0.04 | 1.43 .. 1.57 | 0.071-0.098 | 1.49 |
+| BSISO | NSV 4-D | 1.81 ± 0.05 | 1.71 .. 1.87 | **0.037-0.052** | 1.77 |
+| MJO | BoM RMM | -1.00 ± 0.02 | -1.03 .. -0.97 | 0.83-0.87 | -1.00 |
+| MJO | own-RMM | 1.76 ± 0.04 | 1.70 .. 1.82 | **0.041-0.062** | 1.74 |
+| MJO | sup 2-D | 8.77 ± 0.16 | 8.49 .. 9.08 | 0.0005 | 8.71 |
+| MJO | SSL 2-D | 5.00 ± 0.08 | 4.87 .. 5.15 | 0.0005-0.0010 | 5.08 |
+| MJO | NSV 7-D | 6.00 ± 0.12 | 5.81 .. 6.18 | 0.0005 | 6.20 |
+| MJO | Barlow D7 † | 2.75 ± 0.05 | 2.65 .. 2.84 | 0.005-0.012 | 2.71 |
+| MJO | Barlow D3 † | 3.06 ± 0.06 | 2.95 .. 3.18 | 0.0025-0.0095 | 2.95 |
+| MJO | aux2d † | 2.86 ± 0.06 | 2.77 .. 2.95 | 0.010-0.020 | 2.93 |
+| MJO | aux2d_rebal † | 2.95 ± 0.07 | 2.84 .. 3.08 | 0.007-0.016 | 3.04 |
+| MJO | aux3d † | 2.76 ± 0.06 | 2.64 .. 2.87 | 0.010-0.020 | 2.85 |
+
+**Reading:**
+- **The year-level null is insensitive to the seed.** The SD of z across seeds is 0.02-0.16 and matches the Monte-Carlo prediction ±(0.02 + 0.016·|z|), e.g. MJO sup predicted 0.16 vs observed 0.155. Every reported (seed 42) z lies within about 2 SD of the seed mean. **No verdict and no ranking changes.**
+- **Only a p-value right at 0.05 can flip with the seed.**
+  - BSISO sup is below 0.05 on all 20 seeds (0.024-0.044), but it still fails the deterministic shift null (0.12) and a 5-test correction.
+  - BSISO NSV (0.037-0.052) and MJO own-RMM (0.041-0.062) straddle 0.05, i.e. borderline at the uncorrected level on the swap null. They also fail the shift null (0.09 / 0.14).
+  - Pooling the 20 × 2000 saved draws (40,000) would pin these p-values to about ±0.001.
+- **The uncertainty that matters is not the seed but the small number of ENSO years** (7 EN / 11 LN for BSISO). A year bootstrap or leave-one-year-out run would measure that; not done yet.
+
+## Session 64 — PLAN: exact reproduction of RMM (WH04) and BSISO (Lee et al. 2013) + ENSO displacement in their EOF planes (2026-09-29)
+
+**Status: PLAN ONLY — no code changed.** Both papers (user-provided PDFs) were read in full.
+
+**Framing.** The index "2-D space" is the PC plane of the leading EOF pair. nb35 whitens the latent, so z depends only on the 2-D subspace; PC sign, scaling and in-plane rotation do not matter. For the ENSO test, reproduction success = same subspace (canonical correlations ≈ 1); per-component identity is the stronger target.
+
+### Paper specifications (targets)
+
+| | RMM (Wheeler & Hendon 2004) | BSISO (Lee et al. 2013) |
+|---|---|---|
+| OLR | NOAA interpolated daily OLR (Liebmann & Smith 1996), 2.5° | same |
+| wind | NCEP-NCAR R1 (post-2002 TOVS fix) u850 + u200, 2.5° | NCEP-DOE R2 u850, 2.5° |
+| domain | 15S-15N meridional mean, 144 lons | 10S-40N, 40-160E maps (21×49 = 1029 pts/field) |
+| EOF period | 1979-2001 all days = 8401 d | 1 May-31 Oct 1981-2010 = 5520 d |
+| annual cycle | mean + 3 harmonics, base 1979-2001 | mean + 3 harmonics (base unstated; likely 1981-2010) |
+| interannual | (1) remove SST1-linear part (Drosdowsky & Chambers 2001; monthly regression per calendar month per grid point, interpolated to 365 d); (2) subtract mean of previous 120 d | subtract running mean of last 120 d only (no SST1) |
+| normalisation | each field / sqrt(global, all-longitude variance) | each field / area-averaged temporal SD: 33.04 W m^-2 (OLR), 4.01 m s^-1 (U850) |
+| EOF | covariance matrix, 432-D | covariance matrix, 2058-D |
+| PC normalisation | SD over 1979-2001 | SD over MJJASO 1981-2010 |
+| phases | x = RMM1, y = RMM2 (Fig 7) | x = PC2, y = -PC1 (Fig 8a) |
+
+### Current project versions vs papers
+
+**own-RMM (nb13 + nb24):**
+- Uses ERA5 at 2°.
+- No SST1 step.
+- EOF fitted on the full 1979-2023 record, then Procrustes-rotated to BoM.
+- Matches the paper on: 15S-15N band, 3 harmonics (base 1979-2001), previous-120-d mean (closed='left'), one global-SD normalisation.
+
+**own-EOF BSISO (nb03 + nb35):**
+- Uses ERA5 at 2°.
+- Domain 0-60N, 60-160E; season MJJAS; EOF fitted on 1981-2023.
+- Only May-Sep was downloaded, so the 120-d mean is truncated May-Aug (min_periods=1) and the 3 harmonics are fitted to a partial-year climatology.
+- Matches the paper on: u850 + OLR, area-averaged-SD normalisation.
+
+### Plan: new notebooks nb36-38; existing notebooks untouched until the nb35 extension
+
+- **nb36 (data):** NOAA interpolated OLR daily (PSL); NCEP R1 u850/u200 daily, 15S-15N band; NCEP R2 u850 daily, 10S-40N 40-160E, all months. Use OPeNDAP subsets. SST1 or a proxy. The official BoM RMM and APEC files are already on Drive.
+- **nb37 (RMM, WH04):** meridional mean first (all steps are linear, so they commute) → annual cycle → SST1 regression → 120-d mean → normalise → EOF on 1979-2001 → fix signs from Fig 1 → project the full record → RMM1/2 + phases.
+- **nb38 (BSISO, Lee):** same structure on the 2-D domain; EOF on MJJASO 1981-2010; PC1-4 (BSISO1 + BSISO2); Lee phase convention.
+- **Ambiguity grid** (choose the variant closest to the official index):
+  - whether the 120-d window includes day t;
+  - harmonic fit method and Feb-29 handling;
+  - the 1978 OLR gap for early-1979 windows;
+  - SST1 daily conversion and regression intercept;
+  - cos-lat weighting;
+  - normalisation definition (pinned by 33.04 / 4.01);
+  - area weighting (pinned by Lee Fig 13 PC SDs of 12.0 / 10.0 / 8.8 / 8.4, which match unit-norm EOFs on 2058 unweighted points).
+
+### Validation targets
+
+**RMM:**
+- 8401 d.
+- Explained variance 12.8 / 12.2 / 6.1 %.
+- EOF1 extremes: OLR -8.5 W m^-2, u850 1.2 m/s, u200 2.7 m/s.
+- 30-80 d variance fraction 0.60 / 0.62 (PC3 0.31); Coh² 0.76.
+- RMM1-RMM2 max lag correlation 0.56 at 9 d.
+- r with BoM over 1979-2001 >= 0.99; Procrustes angle ≈ 0.
+
+**BSISO:**
+- 5520 d; normalisation factors 33.04 / 4.01.
+- Explained variance 7.2 / 4.9 / 3.8 / 3.5 % (pair 12.1 %).
+- PC SDs 12.0 / 10.0 / 8.8 / 8.4.
+- 30-60 d fractions 0.55 / 0.45 / 0.38 / 0.22; Coh² 0.48.
+- PC1 leads PC2 by about 13 d, r = 0.34.
+- PC1-RMM2 -0.63, PC2-RMM1 -0.48.
+- r with APEC over MJJASO 1981-2010 >= 0.99.
+
+**Rule:** r >= 0.99 exact; 0.95-0.99 run the ambiguity grid; < 0.95 check data versions.
+
+### ENSO displacement after validation
+
+Extra † rows in nb35 with the headline config; each step changes one thing.
+
+**RMM ladder:**
+- R0 BoM (-1.00)
+- R1 exact reproduction
+- R2 = R1 without SST1: how much does WH04's built-in ENSO regression suppress displacement?
+- R3 = R2 on ERA5 inputs regridded to 2.5° (data source)
+- R4 own-RMM (1.74)
+
+**BSISO ladder:**
+- B0 APEC (-0.41)
+- B1 exact reproduction
+- B2 ERA5 (needs a new all-year ERA5 download; optional)
+- B3 own-EOF (1.23)
+- Optional: BSISO2 (PC3/4) and 4-D (PC1-4) rows, to compare with NSV d̂ = 4.
+
+### Risks
+
+1. **SST1** is BoM-internal; no known public download. Options: ask BoM, re-derive per D&C 2001, or bracket with a Nino-3.4 proxy vs no SST1.
+2. **Dataset versions:** current PSL OLR / NCEP files may differ slightly from those the authors used.
+3. **Official files after 2004 / 2012 are real-time calculations,** so comparisons are restricted to the definition periods.
+
+### Side finding (to verify in nb38; does not affect any z)
+
+nb02's BSISO phase is floor(atan2(PC2, PC1) / 45) + 1. Lee Fig 8a uses x = PC2, y = -PC1. By derivation, **nb02 phase n = Lee phase n + 2 (mod 8)**; e.g. nb02 phase 7 = Lee phase 1.
+- The 8 sector boundaries are identical, so nb35 z-scores are unaffected.
+- Phase-specific physical interpretations in earlier sessions (S7, S12) may be offset by two phases.
+
+> ✓ DECIDED 2026-10-07 (Session 65) — see below. Original questions:
+> (1) SST1 handling;
+> (2) ladder scope (RMM R0-R4 full; BSISO B0/B1/B3 first, B2 later);
+> (3) add BSISO2 / 4-D rows?
+> (4) ENSO test on nb35 common dates only, or also restricted to the EOF-definition years?
+
+---
+
+### Q: own-RMM / own-BSISO versus official indices; correction to the BSISO window description (2026-09-30)
+
+User requested an explanation. Inspected nb03, nb13, nb24, and nb35; checked WH04, Lee et al., BoM methodology, APCC operational updates, and pandas rolling documentation. No analysis notebook edits or climate-data reruns.
+
+- Both official indices and the project's own EOF indices reduce preprocessed fields to PC coordinates. EOFs are spatial patterns; PCs give each day's coordinates on those patterns. Changes in inputs, preprocessing, domain, season, fit period and normalization can change the resulting coordinates, amplitudes and phase assignments.
+- **own-RMM:** nb13 uses ERA5 at 2 degrees, u850/u200/OLR averaged over 15S-15N, annual harmonics calibrated to 1979-2001, and a preceding 120-record mean on all-year daily inputs, without SST1 regression. nb24 computes both full-record and 1979-2001 bases, but nb35 loads `mjo_rmm_own_pcs.npy`, which is full-record Pipeline A standardized over the full record and orthogonally aligned to BoM. The original WH04 basis and PC normalization use 1979-2001, NOAA OLR and NCEP/NCAR winds at 2.5 degrees, with SST1-related linear variability removed before the running-mean step. Thus "everything else identical" was too strong, including for PC normalization.
+- Rotation/sign conventions alter coordinate labels but cannot correct a different underlying subspace. For nb35's fixed dates, official phase bins and whitened distances, invertible changes of coordinates within the same full-rank PC plane do not change the displacement test. Omitting SST1 can leave different ENSO-related background, but cannot by itself be assigned causal responsibility for the observed z difference without controlled comparisons; the original method also does not remove every form of ENSO modulation.
+- **own-BSISO:** nb03 supplies the preprocessed ERA5 fields; nb35 actually fits PCA to u850+OLR, takes the first two PCs, and standardizes them. This is the own-EOF row, compared with official APEC BSISO1 PC1/PC2 (Lee's BSISO2 is PC3/PC4). The project domain is 0-60N, 60-160E, MJJAS, with EOF fit on available aligned years (reported as 1981-2023); Lee's original domain is 10S-40N, 40-160E, MJJASO 1981-2010, NOAA satellite OLR plus NCEP-DOE R2 winds at 2.5 degrees. nb03's annual climatology base is 1981-2010, distinct from the EOF fit period, but its harmonic regression only sees the available MJJAS climatology.
+- **Correction to Session 64 and the quoted user summary:** nb03 concatenates all MJJAS dates and calls `df.rolling(window=120, min_periods=1, closed='left')` with an integer window. This means the previous 120 stored observations, not a 120-calendar-day interval, and there is no per-year reset. In subsequent years, early-season windows reach back into the previous summer. Under complete MJJAS sampling, 2000-07-01 uses 61 days from May-June 2000 plus 59 days from August 3-September 30, 1999. The "truncated to the current summer" account applies only to the beginning of the entire stored series, not every year. This processing can alter residual slow variability and the own-EOF/learned inputs; the magnitude and effect on results have not been quantified. A standard-library calendar illustration verified these counts. A direct pandas miniature check could not run because the shell's Python lacks pandas; behavior was established from inspected code and official API documentation, without installing dependencies.
+- **Original definitions versus official products:** BoM explicitly says exact WH04 through end-2013, modified Gottschalck et al. method from 2014 (correcting the earlier generic post-2004 statement). APCC's 2022 update changed the operational climatological reference period from 1981-2010 to 1991-2020; this does not on its own establish which basis/version is in the project's archived `BSISO.INDEX.NORM.LY.data`. Exact reproduction must pin that file's product version rather than equate all official data with the original paper.
+- Interpretation: own indices are useful EOF baselines on the project's inputs, but are not yet exact reproductions of the official index products. A larger ENSO displacement in own/learned coordinates does not by itself establish that they capture more genuine physical modulation; input/preprocessing and EOF differences are competing explanations.
+
+Sources: WH04 author-uploaded article (https://www.researchgate.net/publication/255569832_An_All-Season_Real-Time_Multivariate_MJO_Index_Development_of_an_Index_for_Monitoring_and_Prediction); Lee et al. original article (https://iprc.soest.hawaii.edu/users/jylee/publication/Lee%20et%20al.%202012%20Climate%20Dynamics.pdf); BoM methodology (https://www.bom.gov.au/climate/mjo/); APCC-authored 2022 update (https://www.ecmwf.int/en/newsletter/173/news/ecmwf-contributes-apec-climate-centers-bsiso-prediction-system); pandas window semantics (https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.rolling.html).
+
+## Session 65 — Index reproduction implemented: nb36-38 + nb35 Cell 12 ladder (2026-10-07)
+
+### Decisions (user, 2026-10-07; answers to Session 64)
+
+1. **SST1 is skipped for now. This is recorded:** RMM is reproduced without the SST1 regression. R1 (WH04 *with* SST1) stays open until an SST1 series is obtained.
+2. **Ladder scope as recommended:**
+   - RMM: R0 / R2 / R3 / R4. R2 is the reproduction, since R1 needs SST1.
+   - BSISO: B0 / B1 / B3 now; B2 (all-year ERA5) later.
+3. **No BSISO2 or 4-D rows** for now. nb38 still computes PC3/PC4 for validation.
+4. **ENSO test on nb35's common dates.**
+
+### Facts established while implementing
+
+**NOAA PSL OPeNDAP:**
+- `interp_OLR/olr.day.mean.nc` covers **1974-06-01 to 2022-12-31** (17,746 consecutive days). The 1978-03-17 to 1978-12-31 gap is stored as missing values: exactly the 290 missing days in the BoM RMM file.
+- R1 and R2 `Dailies/pressure/uwnd.YYYY.nc` exist through 2024; the older `*.dailyavgs` paths also work and are kept as a fallback.
+- Subsetting speed: R1 band about 7 s/year, R2 ASM domain about 5 s/year.
+- **Consequence:** the reproduced indices end on 2022-12-31.
+
+**BoM RMM file header:**
+- "19740601-20131231: Both SST1 variability (ENSO) and 120-day mean have been removed"
+- "20140101-: Only the 120-day has been removed"
+- The per-row tags read `WH04_method:_OLR_&_NCEP_wind` up to 2013-12-31 and `Gottschalk10_method:_OLR_&_ACCESS_wind` from 2014-01-01 to 2024-02-24, where the file ends.
+- **Consequences:** the official R0 is a hybrid (SST1 + NCEP before 2014; no SST1 + ACCESS winds after). The cleanest validation window is 1979-2001.
+
+**APEC file:** 1981-01-01 to 2025-10-31, 8 columns (YEAR DAY PC1-4 + 2 amplitudes), one -999.9 day (2015, day 172).
+
+### Notebooks (folder `notebooks/index_repro/`)
+
+**nb36 `36_index_repro_data.ipynb`:**
+- Downloads OLR (15S-15N band + 10S-40N 40-160E), R1 u850/u200 (band, 1978-2022) and R2 u850 (ASM domain, 1979-2022, all months).
+- Per-year Drive cache, retries.
+- Outputs `data/index_repro/{noaa_olr_15S15N, noaa_olr_asm, ncep_r1_uwnd_15S15N, ncep_r2_u850_asm}.npz`.
+
+**nb37 `37_rmm_reproduction_wh04.ipynb`:**
+- WH04 pipeline without SST1.
+- 8-variant grid (120-d window incl./excl. day t × harmonic fit × cos weighting), scored by r with BoM over 1979-2001.
+- Validation vs the paper (8401 d; 12.8 / 12.2 / 6.1 %; 30-80 d fractions; Coh²; lag correlation; Fig. 1 extremes) and vs BoM in three periods (1979-2001, 2002-2013, 2014-2022): r, canonical, Procrustes, phase agreement. Also checks BoM's phase column against the WH04 phase formula.
+- **R3** = the same method on ERA5 `X_MJO` regridded to 2.5° with the EOF on 1979-2001.
+- Outputs `rmm_wh04_repro.npz` (R2), `rmm_wh04_era5.npz` (R3), `results/index_repro/rmm_*`.
+
+**nb38 `38_bsiso_reproduction_lee2013.ipynb`:**
+- Lee et al. pipeline.
+- 16-variant grid (window × harmonic fit × normalisation mean-SD / RMS-SD × no / sqrt(cos) weighting), scored by mean r of PC1-4 with APEC over MJJASO 1981-2010.
+- Covariance eigendecomposition instead of SVD (identical, 4× faster).
+- Validation vs the paper: 5520 d; 33.04 / 4.01; 7.2 / 4.9 / 3.8 / 3.5 %; PC SD 12.0 / 10.0 / 8.8 / 8.4; 30-60 d fractions; Coh²; lag correlation; correlation with RMM.
+- Validation vs APEC: MJJASO 1981-2010, MJJASO 2011-2022, Nov-Apr projection.
+- **Cell 6:** crosstab of nb02's `bsiso_phase` vs the Lee-convention phase from the APEC PCs (tests the Session 64 "+2" finding).
+- Output `bsiso_lee_repro.npz` (B1).
+
+**nb35 Cell 12 (new; existing cells untouched, outputs kept):**
+- The ladder on the nb35 common dates ∩ the days every step covers; headline configuration.
+- Outputs `index_ladder.csv` and `index_ladder.png`.
+- Needs nb35 Cells 1-8 run first.
+
+### Tests (local, no code run on Colab yet)
+
+- **nb36** against the real PSL servers for 1978-1979 (OLR, R1) and 1981 (R2): shapes and grids as expected (21 × 49 domain), exactly 290 all-missing OLR days.
+- **nb37, nb38 and nb35 Cell 12** on a synthetic tree whose fields are generated from the mock official indices:
+  - recovered official r = 0.994 (RMM), plane match 0.996; BSISO r ≈ 0.94 (mock noise level), plane match 0.994;
+  - **only the "includes day t" 120-d window gives 8401 EOF days (WH04's count)**: the other variant loses 1979-01-01 to the OLR gap;
+  - the phase check confirms the +2 mapping on the mock (guaranteed there; the real-data test is pending);
+  - the ladder table and figure are produced (MJO 7937, BSISO 2011 mock days).
+- **Expected runtimes on Colab:** nb36 about 15 min first run; nb37 about 1 min; nb38 about 2-3 min; Cell 12 about 1 min.
+
+> Next: user runs nb36 → nb37 → nb38 → nb35 (Cells 1-8, then 12) and sends back the nb37 / nb38 validation tables, the nb38 Cell 6 crosstab and the Cell 12 ladder.
+
 ---
 
 *Log maintained by Claude Code and Codex. Updated each session.*
