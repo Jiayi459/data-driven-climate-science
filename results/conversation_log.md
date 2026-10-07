@@ -5881,3 +5881,22 @@ Sources: WH04 author-uploaded article (https://www.researchgate.net/publication/
 ---
 
 *Log maintained by Claude Code and Codex. Updated each session.*
+
+
+## Session 66 — ENSO displacement codebase audit and LaTeX synthesis (2026-10-07)
+
+User requested a complete organization of ENSO-displacement data, code, and tasks, followed by a journal-style LaTeX explanation from encoding to latent geometry, statistic construction, and result interpretation. Delivered `results/enso_displacement_synthesis.tex`: structure first, detailed methods/results, and code/artifact/historical-result appendices. Source snapshot: d0d6a12.
+
+Evidence: inspected all notebook source cells with ENSO/displacement references, notebook 35 saved real-data output and seed results, Sessions 62b–65 of the repository log, earlier reports, and identified September 23 Downloads exports. Tables use the current saved nb35 headline (MJO SSL z_year=5.083), not the earlier exported 5.0066. No climate-data processing or training rerun; no analysis notebooks modified. External references verified against Lee et al. (2013), Wheeler and Hendon (2004), Winkler et al. (2015), and the BoM methodology page.
+
+Key interpretation: BSISO temporal SSL has z_year=1.494, p_year=0.0810; nominal supervised p=0.039 fails the shift check and a five-comparison Bonferroni threshold. MJO supervised/SSL/NSV saved representations retain z_year=8.706/5.083/6.203, but pooled label-informed training statistics are not independent discovery tests. Barlow and auxiliary results are weaker and more null-sensitive. Permutation-seed variation is Monte Carlo uncertainty, not a year-sampling CI.
+
+New source-code findings (not fixed in this documentation task): in nb04, nb07c, and nb14 the Dataset discards positive/hard-negative/easy-negative types and passes every sampled pair to InfoNCE's diagonal positive target. Thus designated negatives are not explicitly repelled as described in the notebook prose. Easy-negative fallbacks can sample the full labels table instead of restricting to the training split. Checkpoint provenance and reruns are required to quantify impact; do not attribute every historical checkpoint to current source automatically.
+
+Other limitations retained: nb03's integer 120-record rolling window on concatenated MJJAS data crosses summer gaps; whitening is linear-coordinate invariant only subject to retained-rank/numerical assumptions and does not remove dimension effects; obs/null-mean is not a sample-size-independent physical effect size; month-preserving year permutations still require exchangeability and are not an automatic exact test of conditional-mean equality.
+
+Tasks distinguished: MJJAS extension, later year splits/balanced probes, nb35 unified nulls and real 20-seed runs are completed. Year bootstrap/leave-event-out, strictly held-out displacement, sampling/loss repair, matched data provenance, and physical/multiplicity controls remain. Nb36–38 and nb35 Cell 12 are implemented but real-climate index validation/ladder results remain pending; SST1 reproduction and all-year ERA5 BSISO step are deferred.
+
+Validation: all 15 headline rows matched programmatically to saved nb35 stdout; LaTeX environments/braces, cross-references and bibliography checked. No local TeX engine was available, so the source was not compiled/rendered.
+
+Follow-up: user requested committing the LaTeX synthesis and conversation-log update and pushing them to GitHub origin/main. This publication contains documentation only; analysis notebooks remain unchanged.

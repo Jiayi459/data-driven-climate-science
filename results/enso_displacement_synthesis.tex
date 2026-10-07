@@ -1,0 +1,635 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,longtable,array,tabularx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xurl}
+\usepackage{microtype}
+\newcommand{\EN}{\mathrm{EN}}
+\newcommand{\LN}{\mathrm{LN}}
+\newcommand{\Neu}{\mathrm{N}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\setlength{\emergencystretch}{3em}
+\title{From Atmospheric Fields to ENSO Displacement in Representation Space:\\Methods, Results, and Reproducibility Audit}
+\author{ENSO--BSISO/MJO Representation Learning Project}
+\date{Code and evidence reviewed through 7 October 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Overall structure and scientific logic}
+
+The analysis asks whether atmospheric states belonging to the same intraseasonal phase occupy different locations in a representation space during El Ni\~no and La Ni\~na. Its logic is
+\begin{equation*}
+\begin{gathered}
+\text{atmospheric fields}
+\xrightarrow{\text{preprocessing}}
+X_t
+\xrightarrow{\text{encoder}}
+\mathbf z_t
+\xrightarrow{\text{date alignment and whitening}}
+\widetilde{\mathbf z}_t
+\\
+\xrightarrow{\text{condition on index phase and ENSO}}
+\bigl(\boldsymbol\mu_{p,\EN},\boldsymbol\mu_{p,\LN}\bigr)
+\xrightarrow{\text{centroid distance}}
+D_{\mathrm{obs}}
+\xrightarrow{\text{year-block reference distribution}}
+\bigl(z_{\mathrm{year}},p_{\mathrm{year}}\bigr).
+\end{gathered}
+\end{equation*}
+
+The manuscript follows seven steps.
+\begin{enumerate}
+\item \textbf{Define the question and data.} Specify the atmospheric variables, sampling period, intraseasonal phase, activity threshold, and ENSO labels.
+\item \textbf{Explain the representations.} Describe how an EOF projection or neural encoder assigns coordinates to each atmospheric state, and distinguish label-informed training from self-supervision.
+\item \textbf{Define displacement.} Align the evaluation dates, standardize the geometry, calculate phase-conditioned centroids, and aggregate their distances.
+\item \textbf{Define the reference distribution.} Explain why temporally coherent ENSO histories, rather than independent daily labels, are the relevant permutation units.
+\item \textbf{Report the results.} Present the unified BSISO and MJO comparisons, sensitivity to analysis choices, and Monte Carlo variability.
+\item \textbf{Interpret the evidence.} Separate representation-space association from physical mechanism, independent generalization, and information beyond conditional means.
+\item \textbf{Specify remaining work.} Identify implementation corrections, independent evaluation, uncertainty estimation, and index-reproduction tasks. Appendices map these tasks to code, data products, and historical experiments.
+\end{enumerate}
+
+\section{Research question, data, and scope}
+\label{sec:data}
+
+The scientific target is an ENSO-dependent change in the atmospheric structure associated with a given BSISO or MJO phase. If a representation retains this dependence, the conditional distributions
+\begin{equation}
+\mathcal{L}(\mathbf z_t\mid P_t=p,E_t=\EN)
+\quad\text{and}\quad
+\mathcal{L}(\mathbf z_t\mid P_t=p,E_t=\LN)
+\label{eq:distributions}
+\end{equation}
+may differ. Here $P_t\in\{1,\ldots,8\}$ is an index-derived phase and $E_t$ is the ENSO category. The implemented displacement statistic examines the difference between the \emph{means} of these distributions. It does not test every possible distributional difference.
+
+This synthesis is based on the source code and saved notebook outputs at repository revision \code{d0d6a12}, together with the project conversation log and identified exported result tables. The principal numerical evidence is the saved output of notebook~35, \path{notebooks/35_enso_displacement_unified.ipynb}. Training and climate-data processing were not rerun for this synthesis. Earlier reports are treated as records of earlier configurations, rather than substitutes for the unified results.
+
+\subsection{BSISO and MJO input fields}
+
+The BSISO branch uses ERA5 $u_{850}$, $v_{850}$, and an OLR field over $0$--$60^\circ\mathrm{N}$ and $60$--$160^\circ\mathrm{E}$ on a $2^\circ$ grid. Each state is represented by
+\begin{equation}
+X_t^{\mathrm{BSISO}}\in\R^{3\times31\times51}.
+\end{equation}
+The initial July experiments contained 1,333 aligned days. The MJJAS extension contains 6,579 days over 1981--2023 after alignment with the BSISO labels. Although the atmospheric download begins in 1979, the aligned BSISO analysis does not have 45 complete labeled years.
+
+The principal MJO branch uses ERA5 $u_{850}$, $u_{200}$, and OLR, averaged over the equatorial latitude band and sampled at 180 longitudes. Its CNN input is
+\begin{equation}
+X_t^{\mathrm{MJO}}\in\R^{3\times1\times180}.
+\end{equation}
+The aligned all-season record contains 16,436 days. The separate \code{lat16} experiments retain latitude information and are historical sensitivity experiments, not additional rows in the unified core comparison.
+
+The repository contains both earlier 12:00~UTC snapshot experiments and subsequent daily-mean experiments. A recently saved embedding file does not by itself establish the temporal averaging of its upstream input. Notebook~35 controls evaluation dates, phase bins, and measurement geometry, but does not make all upstream datasets or training procedures identical.
+
+\subsection{Preprocessing and temporal support}
+
+The BSISO experiments progress from gridpoint standardization (Approach~A), through removal of each year's available-season mean (Approach~B), to a Lee-style anomaly pipeline. The latter removes a fitted seasonal cycle,
+\begin{equation}
+c_v(d,\mathbf s)=a_{0,v}(\mathbf s)+
+\sum_{k=1}^{3}\left[
+a_{k,v}(\mathbf s)\cos\!\left(\frac{2\pi kd}{365}\right)+
+b_{k,v}(\mathbf s)\sin\!\left(\frac{2\pi kd}{365}\right)
+\right],
+\end{equation}
+subtracts a running background from $A_v(t,\mathbf s)=F_v(t,\mathbf s)-c_v(d_t,\mathbf s)$, and divides each variable by one spatially averaged temporal standard deviation. This approach is motivated by the preprocessing used to construct BSISO indices \cite{lee2013}.
+
+An implementation distinction affects the interpretation. Notebook~03 applies
+\begin{center}
+\code{rolling(window=120, min_periods=1, closed='left')}
+\end{center}
+to concatenated MJJAS observations. Thus its background estimate uses up to the preceding 120 \emph{stored observations}, not necessarily the preceding 120 calendar days:
+\begin{equation}
+X_v(t_i,\mathbf s)=\frac{1}{s_v}
+\left[A_v(t_i,\mathbf s)-
+\frac{1}{m_i}\sum_{j=\max(1,i-120)}^{i-1}A_v(t_j,\mathbf s)\right],
+\label{eq:storedwindow}
+\end{equation}
+where $m_i$ is the number of available preceding records, for $m_i>0$. Windows early in a later summer can include observations from the preceding summer. The harmonic fit also uses a climatology available only during MJJAS. Consequently, these inputs should not be described as an exact reproduction of the original continuous-record preprocessing, or as guaranteeing complete removal of interannual variability.
+
+Notebook~08 additionally applies a 25-day Lanczos low-pass filter separately within each BSISO summer, discarding 25 days at each edge. The retained record has 4,429 days. This is not an explicit 25--90-day band-pass: suppression of slower variability is left to the preceding background subtraction. The MJO temporal-SSL branch applies an explicit 20--90-day Lanczos band-pass with a 181-point kernel, leaving 16,256 days after edge removal. Filtering changes both temporal dependence and the dates available for comparison.
+
+\subsection{Phase, amplitude, and ENSO labels}
+
+BSISO phases and amplitudes are derived from the archived APEC BSISO1 principal components. The MJO branch uses the BoM RMM phase and amplitude. EOF-based indices themselves provide two-dimensional coordinates for atmospheric variability \cite{lee2013,wheeler2004}.
+
+Notebook~02 assigns each BSISO year the category of its JJA-mean Ni\~no-3.4 anomaly. Notebook~11 instead assigns each MJO day the category of its calendar month's anomaly. Both implementations use
+\begin{equation}
+E(a)=
+\begin{cases}
+\EN,&a\geq0.5\,{}^\circ\mathrm C,\\
+\LN,&a\leq-0.5\,{}^\circ\mathrm C,\\
+\Neu,&\text{otherwise}.
+\end{cases}
+\end{equation}
+These are the project's threshold classifications; they should not be conflated with an event definition that additionally requires persistence across consecutive seasons.
+
+The unified analysis retains days with index amplitude at least one and phase between one and eight. BSISO amplitude fill values are rejected; MJO days must also pass the stored weak-MJO flag. Neutral days contribute to the evaluation population, whitening, and permuted label histories, but not directly to the observed El Ni\~no and La Ni\~na centroids.
+
+\section{From atmospheric fields to representation coordinates}
+\label{sec:encoding}
+
+For representation $r$, an encoder maps a processed atmospheric state to
+\begin{equation}
+\mathbf z_t^{(r)}=f_{\theta_r}(X_t)\in\R^{d_r}.
+\label{eq:encoder}
+\end{equation}
+The embedding space is the coordinate system defined by this map. A plotted point represents one atmospheric state; the axes are learned features or principal-component amplitudes, not geographical longitude and latitude. Inference uses frozen network weights in evaluation mode, and the resulting coordinates are stored with a corresponding date axis.
+
+\subsection{EOF and official-index representations}
+
+For a linear EOF encoder,
+\begin{equation}
+\mathbf z_t=W^\mathsf{T}(\mathbf x_t-\overline{\mathbf x}),
+\end{equation}
+where $\mathbf x_t$ concatenates the appropriately processed variables and $W$ contains the retained EOF patterns. No additional neural encoder is required to evaluate displacement in the official BSISO1 or RMM plane.
+
+Notebook~35 also fits an own-EOF BSISO baseline to the $u_{850}$ and OLR channels of \code{X_MJJAS_lee.npy}; $v_{850}$ is excluded from this particular baseline. It takes and standardizes the first two PCs. Notebook~24 supplies the own-RMM baseline. These baselines differ from the official products in their inputs, preprocessing, spatial support, and/or EOF fitting period. In the saved BSISO run, the own-EOF plane has canonical correlations of 0.93 and 0.91 with the APEC plane. This indicates substantial agreement, not identity.
+
+\subsection{CNN representations and their training objectives}
+
+The initial network produces a 64-dimensional, $L_2$-normalized output. The principal two-dimensional BSISO networks use three convolutional blocks with channel widths $16$, $32$, and $32$, two spatial pooling operations, global average pooling, and a linear output layer. The MJO version convolves and pools along longitude. The two-dimensional outputs are not constrained to unit norm, allowing both angle and radius to vary:
+\begin{equation}
+\theta_t=\operatorname{atan2}(z_{t,2},z_{t,1}),
+\qquad r_t=\sqrt{z_{t,1}^2+z_{t,2}^2}.
+\end{equation}
+Neither coordinate has an automatic physical interpretation. A radius--amplitude association or an angle--phase correspondence must be established empirically.
+
+For a batch of paired views $(X_i^A,X_i^B)_{i=1}^{B}$, the implemented contrastive loss is the one-directional cross-entropy
+\begin{equation}
+\mathcal L_{\mathrm{NCE}}=
+-\frac{1}{B}\sum_{i=1}^{B}
+\log\frac{\exp\!\left[(\mathbf z_i^A)^\mathsf T\mathbf z_i^B/\tau\right]}
+{\sum_{j=1}^{B}\exp\!\left[(\mathbf z_i^A)^\mathsf T\mathbf z_j^B/\tau\right]}.
+\label{eq:nce}
+\end{equation}
+The paired element on the diagonal is the target; other batch elements provide competing matches. For unit-normalized embeddings the similarity is cosine similarity, while for the unnormalized two-dimensional embeddings it also depends on magnitude. Later supervised configurations add variance-floor and covariance penalties to limit collapse. These additions do not change the diagonal target in Equation~\eqref{eq:nce}.
+
+In notebooks~08 and~15, the paired view is drawn from available days within $\pm3$ days of the anchor, excluding the anchor and remaining within the same calendar year and split. The sampler falls back to the anchor itself if no neighbor exists. Phase and ENSO labels do not define these training pairs. These are the temporal self-supervised representations.
+
+\paragraph{Implementation finding in the label-informed branches.}
+The code called ``supervised'' uses phase and ENSO labels to construct pairs. Its intended design distinguishes same-phase/same-ENSO pairs, same-phase/different-ENSO hard negatives, and different-phase easy negatives. However, the inspected implementations in notebooks~04, 07c, and~14 sample these three branches with nominal probabilities 0.30, 0.20, and 0.50, discard the pair-type label, and return every pair to the diagonal target of Equation~\eqref{eq:nce}. Consequently, the designated negative pairs are also optimized as positive matches. The current implementation does not implement the stated explicit hard-negative repulsion.
+
+In addition, the easy-negative fallback can sample from the full labels table when a training subgroup is empty; those fallback paths are not explicitly restricted to the training indices. This creates a possible split violation whose frequency has not been measured. These findings concern inspected source code. The exact training provenance of each saved checkpoint must be established before attributing an individual historical result to a particular implementation. The numerical results below retain the notebook names ``supervised,'' but treat their scientific interpretation as provisional.
+
+\subsection{NSV, Barlow Twins, and moisture-auxiliary representations}
+
+The neural-state-variable (NSV) branch first learns a 64-dimensional representation through prediction of the atmospheric field ten days later. A second autoencoder compresses this representation to $d=4$ for BSISO or $d=7$ for MJO:
+\begin{equation}
+\mathbf h_t=f_\theta(X_t),\qquad
+\mathbf v_t=g_\phi(\mathbf h_t),\qquad
+\mathcal L_{\mathrm{refine}}=
+\left\|h_\psi(g_\phi(\mathbf h_t))-\mathbf h_t\right\|_2^2.
+\end{equation}
+Notebook~35 evaluates displacement in $\mathbf v_t$, reconstructing the full date order from the saved training and validation arrays. The earlier 64-dimensional NSV feature-space displacement remains a separate historical result.
+
+The MJO Barlow-Twins branch uses an encoder followed by a projector, producing three- or seven-dimensional outputs. For temporally separated views, notebook~26 minimizes
+\begin{equation}
+\mathcal L_{\mathrm{BT}}(\ell)=
+\lambda_{\mathrm{inv}}(\ell)\sum_i(1-C_{ii}^{(\ell)})^2+
+\lambda_{\mathrm{off}}(\ell)\sum_{i\ne j}(C_{ij}^{(\ell)})^2,
+\end{equation}
+where $C^{(\ell)}$ is the cross-correlation-like matrix of batch-standardized outputs at lag $\ell$. This objective encourages temporal agreement and reduces cross-coordinate redundancy. It does not guarantee that the full-record output covariance is exactly identity; empirical whitening is still applied during unified evaluation.
+
+Notebooks~31 and~32 add moisture and OLR reconstruction objectives to temporal contrastive learning, with two- and three-dimensional outputs. Their ENSO statistics therefore evaluate representations trained to retain additional atmospheric information without directly supplying ENSO labels. These variants, and the Barlow variants, are supplementary comparisons rather than members that determine the common-date intersection.
+
+\section{Definition and computation of ENSO displacement}
+\label{sec:statistic}
+
+\subsection{A common evaluation population}
+
+For each climate mode separately, notebook~35 intersects the dates available to all core representations with the active-day mask and the accepted ENSO-year blocks. Alignment is by date, not by row number. The saved run uses 2,491 common BSISO days and 9,834 common MJO days. All five supplementary MJO representations cover the full common MJO set in that run.
+
+BSISO has 43 accepted calendar-year blocks, with retained El Ni\~no and La Ni\~na days drawn from seven and eleven years, respectively. MJO has 44 accepted June--May blocks, beginning in 1979--2022, with 18 blocks containing El Ni\~no days and 26 containing La Ni\~na days. Because MJO labels vary monthly, these two block sets need not be disjoint. The code's block-completeness check requires coverage of each relevant calendar month in the metadata; it is not a guarantee that every calendar day survives filtering and activity selection.
+
+The phase bins are the same index-derived bins for every representation. Thus a given BSISO or MJO phase contains the same evaluated dates across methods. A sensitivity analysis that instead uses each two-dimensional latent's own angular sectors changes the conditioning variable and answers a different question.
+
+\subsection{Whitening and measurement units}
+
+Raw latent distances depend on coordinate scaling. Notebook~35 estimates the mean and covariance over the selected evaluation population, including neutral days:
+\begin{equation}
+\overline{\mathbf z}=\frac{1}{N}\sum_t\mathbf z_t,
+\qquad
+\widehat C=\frac{1}{N-1}\sum_t
+(\mathbf z_t-\overline{\mathbf z})(\mathbf z_t-\overline{\mathbf z})^\mathsf T.
+\end{equation}
+Writing $\widehat C=V\Lambda V^\mathsf T$, it retains eigenvalues greater than $10^{-9}\lambda_{\max}$ and computes
+\begin{equation}
+\widetilde{\mathbf z}_t=
+\Lambda_K^{-1/2}V_K^\mathsf T(\mathbf z_t-\overline{\mathbf z}).
+\label{eq:whiten}
+\end{equation}
+Euclidean distance in these coordinates is a Mahalanobis distance in the retained original space. For full-rank covariance without numerical truncation, it is invariant to invertible linear reparameterizations of that space. It is not invariant to arbitrary nonlinear transformations, and eigenvalue truncation can affect numerical invariance near rank deficiency. Whitening also does not eliminate differences caused by representation dimension or by the information retained by different encoders.
+
+This is global whitening, not separate whitening within each ENSO category or phase. The transform is estimated once for a representation and configuration and is held fixed throughout its permutation test.
+
+\subsection{Within-phase centroids and their separation}
+
+For phase $p$ and category $e$, define
+\begin{equation}
+\mathcal I_{p,e}=\{t:P_t=p,E_t=e\},\qquad
+n_{p,e}=|\mathcal I_{p,e}|,
+\end{equation}
+\begin{equation}
+\widehat{\boldsymbol\mu}_{p,e}
+=\frac{1}{n_{p,e}}\sum_{t\in\mathcal I_{p,e}}
+\widetilde{\mathbf z}_t.
+\end{equation}
+The displacement vector and its magnitude are
+\begin{equation}
+\widehat{\boldsymbol\Delta}_p
+=\widehat{\boldsymbol\mu}_{p,\EN}
+-\widehat{\boldsymbol\mu}_{p,\LN},
+\qquad
+d_p=\|\widehat{\boldsymbol\Delta}_p\|_2.
+\label{eq:phase}
+\end{equation}
+The reported scalar statistic is
+\begin{equation}
+D_{\mathrm{obs}}=
+\frac{1}{|\mathcal P_{\mathrm{obs}}|}
+\sum_{p\in\mathcal P_{\mathrm{obs}}}d_p,
+\qquad
+\mathcal P_{\mathrm{obs}}=
+\{p:n_{p,\EN}\geq3,\ n_{p,\LN}\geq3\}.
+\label{eq:mean}
+\end{equation}
+Each eligible phase receives equal weight. This is neither a sample-size-weighted average nor the distance between the two unconditional ENSO centroids. In particular,
+\begin{equation}
+\frac{1}{8}\sum_{p=1}^8\|\widehat{\boldsymbol\Delta}_p\|_2
+\ne
+\left\|\frac{1}{8}\sum_{p=1}^8\widehat{\boldsymbol\Delta}_p\right\|_2
+\end{equation}
+in general. Oppositely directed phase-specific displacements can cancel in the second expression, while remaining detectable in the first.
+
+For high-dimensional representations, distances are calculated in the full retained latent space. A t-SNE or two-dimensional PCA plot is a visualization and is not the space used for this statistic. ``Displacement'' denotes a difference between conditional population centroids; it is not the movement of an individual atmospheric event between two days.
+
+\subsection{Relation to physical-space composites}
+
+Let $\mathbf x_t$ denote the processed physical field. The corresponding physical composite difference is
+\begin{equation}
+\boldsymbol\Delta_p^X=
+\E[\mathbf x_t\mid P_t=p,E_t=\EN]
+-\E[\mathbf x_t\mid P_t=p,E_t=\LN].
+\end{equation}
+For a fixed linear encoder, the latent mean difference is a linear projection of this difference. For a nonlinear encoder,
+\begin{equation}
+\E[f_\theta(\mathbf x_t)\mid p,e]
+\ne f_\theta\!\left(\E[\mathbf x_t\mid p,e]\right)
+\end{equation}
+in general. Therefore, a latent mean can respond to nonlinear features of the physical distribution. Nevertheless, the implemented diagnostic remains a conditional-mean comparison in the chosen feature space. Demonstrating information beyond conventional composites requires an explicit additional test, such as covariance differences, a distributional two-sample statistic, or improved independent prediction.
+
+\section{Reference distributions and statistical inference}
+\label{sec:null}
+
+\subsection{Daily shuffling and the dependence problem}
+
+Early notebooks globally shuffle ENSO labels across individual days, recompute Equation~\eqref{eq:mean}, and standardize the observation against the resulting distribution. This preserves overall daily category counts but breaks their temporal clustering. In BSISO, many days share one annual label; in MJO, labels persist over months. Nearby atmospheric states and slow latent components are also dependent. Treating all these daily label placements as exchangeable can underestimate chance centroid separation and exaggerate evidence.
+
+The reference mean need not be zero: even under no systematic ENSO association, finite-sample centroids differ. For illustration, under independent observations with a common within-phase covariance $\Sigma_p$ and equal population means,
+\begin{equation}
+\E\!\left[\left\|
+\widehat{\boldsymbol\mu}_{p,\EN}
+-\widehat{\boldsymbol\mu}_{p,\LN}
+\right\|_2^2\right]
+=\operatorname{tr}(\Sigma_p)
+\left(\frac{1}{n_{p,\EN}}+\frac{1}{n_{p,\LN}}\right).
+\end{equation}
+Temporal dependence adds covariance terms and invalidates a naive count of days as independent replicates. Respecting dependence through restricted permutations requires an explicit exchangeability assumption \cite{winkler2015}; choosing blocks alone does not establish that assumption.
+
+\subsection{Year-level label-history permutations}
+
+The principal test in notebook~35 represents the ENSO labels as a table $L_{b,s}$, where $b$ is an ENSO-year block and $s$ is calendar month. BSISO uses calendar years; MJO uses June--May years. For a random permutation $\pi$ of complete blocks, each evaluated day receives
+\begin{equation}
+E_t^{(\pi)}=L_{\pi(b_t),s_t}.
+\label{eq:permutation}
+\end{equation}
+Embeddings, dates, activity selection, and phase labels remain fixed. For BSISO this reassigns an annual JJA category to a whole summer. For MJO it transfers an entire monthly label history while retaining calendar-month alignment. It does not replace all months in an MJO year by one category.
+
+The test samples 2,000 block permutations. Fixed points and transfers between years with identical categories are allowed. With unequal numbers of retained days per block, the number of evaluated El Ni\~no or La Ni\~na days can change across permutations, even though the label-history table is permuted without replacement. The eligible phase set is recalculated for each draw; the implementation averages over the phases meeting the minimum-count criterion in that draw.
+
+This randomization evaluates the observed alignment of ENSO histories with fixed latent states and phase assignments under the permitted block exchanges. It is not automatically an exact test of conditional-mean equality alone: phase occupancy, activity selection, long-term change, and block exchangeability also matter. The comparison should therefore be reported together with its construction and sensitivity checks.
+
+\subsection{Standardized statistics, empirical probabilities, and cyclic shifts}
+
+Let $D_1^{(0)},\ldots,D_M^{(0)}$ be the finite statistics from the selected null. The code computes
+\begin{align}
+\widehat\mu_0&=\frac{1}{M}\sum_{b=1}^{M}D_b^{(0)},\\
+\widehat\sigma_0&=
+\left[\frac{1}{M}\sum_{b=1}^{M}(D_b^{(0)}-\widehat\mu_0)^2\right]^{1/2},\\
+z_{\mathrm{year}}&=
+\frac{D_{\mathrm{obs}}-\widehat\mu_0}{\widehat\sigma_0+10^{-12}},
+\label{eq:z}\\
+p_{\mathrm{year}}&=
+\frac{1+\sum_{b=1}^{M}\mathbf1\{D_b^{(0)}\geq D_{\mathrm{obs}}\}}{M+1}.
+\label{eq:p}
+\end{align}
+The $z$ statistic is a standardized distance from the permutation mean, not a demonstrated standard-normal variate. The figure's $z=2$ line is a visual reference, not an exact significance threshold. A negative $z$ indicates a nonnegative displacement smaller than the null mean; it does not indicate a reversal of the ENSO displacement vector.
+
+With 2,000 finite draws, the minimum reported probability is $1/2001\simeq0.00050$. This is a Monte Carlo resolution limit, not a probability of zero. Inference must additionally account for the number of representations and configurations examined.
+
+The reported ratio
+\begin{equation}
+R_{\mathrm{year}}=D_{\mathrm{obs}}/\widehat\mu_0
+\end{equation}
+describes separation relative to the chosen chance baseline. Although dimensionless, it is not a sample-size-independent physical effect size: its denominator depends on sampling, dependence, phase composition, and dimension. Reporting $D_{\mathrm{obs}}$, the null mean and spread, and the permutation probability is more informative than reporting $z$ alone.
+
+A second test cyclically shifts the ordered ENSO-year label histories by every nonzero whole-year lag. This retains the cyclic ordering of multi-year ENSO sequences. There are 42 shifts for BSISO and 43 for MJO, giving minimum attainable probabilities of $1/43$ and $1/44$, respectively. The check has coarse resolution and relies on a defensible stationarity approximation; it does not remove arbitrary decadal confounding.
+
+The slow-variance diagnostic is
+\begin{equation}
+S_{\mathrm{slow}}=
+\frac{\sum_b n_b\|\overline{\widetilde{\mathbf z}}_b-
+\overline{\widetilde{\mathbf z}}\|_2^2}
+{\sum_t\|\widetilde{\mathbf z}_t-
+\overline{\widetilde{\mathbf z}}\|_2^2}.
+\end{equation}
+It measures the fraction of total latent variation associated with block means. A large value flags sensitivity to slow structure; it is neither proof of confounding nor a formal correction for it. The notebook's synthetic examples show that year shuffling can still reject too often under strong decadal drift and clustered ENSO histories. Such behavior does not establish a mathematical upper bound on the true significance.
+
+\section{Results of the unified comparison}
+\label{sec:results}
+
+\subsection{BSISO: weak evidence after accounting for year structure}
+
+Table~\ref{tab:bsiso} reports the saved notebook~35 comparison on the same 2,491 active days. The legacy daily null gives positive standardized statistics from 3.32 to 13.42. After replacing that null with year-history permutations, the values range from $-0.40$ to 1.91.
+
+\begin{table}[htbp]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\caption{Unified BSISO results. All rows use common active days, globally whitened coordinates, and the same index-phase bins. Probabilities are unadjusted. $S$ denotes $S_{\mathrm{slow}}$.}
+\label{tab:bsiso}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Representation & $d$ & $z_{\rm day}$ & $z_{\rm year}$ & $p_{\rm year}$ & $p_{\rm shift}$ & $R_{\rm year}$ & $S$\\
+\midrule
+APEC BSISO1 & 2 & 3.320 & -0.400 & 0.6457 & 0.6744 & 0.921 & 0.095\\
+Own-EOF & 2 & 8.830 & 1.272 & 0.1144 & 0.1395 & 1.257 & 0.123\\
+Supervised, nb07c & 2 & 7.818 & 1.912 & 0.0390 & 0.1163 & 1.419 & 0.114\\
+Temporal SSL, nb08 & 2 & 11.706 & 1.494 & 0.0810 & 0.0698 & 1.351 & 0.268\\
+NSV, nb20 & 4 & 13.421 & 1.773 & 0.0520 & 0.0930 & 1.269 & 0.165\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The supervised row crosses an unadjusted 0.05 threshold under year swaps, but not under cyclic shifts. It also fails a simple Bonferroni threshold of $0.05/5=0.01$ for the five BSISO representations. Temporal SSL does not cross 0.05 under either null, and NSV is borderline under year swaps. Thus the unified results do not support the earlier unqualified claim of highly significant BSISO displacement across the learned representations.
+
+The BSISO SSL row gives a concrete illustration of the calculation. The matching exported result has
+\begin{equation}
+D_{\mathrm{obs}}=0.5754,\qquad
+\widehat\mu_{0,\mathrm{year}}=0.4259,\qquad
+\widehat\sigma_{0,\mathrm{year}}=0.1001,
+\end{equation}
+so $z_{\mathrm{year}}\simeq1.494$ and $R_{\mathrm{year}}\simeq1.351$. The geometric separation is real as a descriptive property of the saved embeddings, but a substantial separation is also expected from chance alignment of entire years.
+
+Its exported phase distances are approximately
+\begin{equation}
+(d_1,\ldots,d_8)=
+(0.905,0.751,0.511,0.277,0.843,0.862,0.354,0.100).
+\end{equation}
+These are point estimates, not eight separately established effects. The matched BSISO sample contains only 28 El Ni\~no days in repository phase~7, compared with 121 La Ni\~na days. Moreover, the proposed offset between repository BSISO phase numbering and the Lee figure convention awaits the real-data cross-tabulation in notebook~38. Physical narratives attached to a numbered phase therefore require both sample uncertainty and phase-convention verification.
+
+\subsection{MJO: association remains in several learned spaces}
+
+The MJO comparison uses 9,834 common active days (Table~\ref{tab:mjo}). The saved supervised, temporal-SSL, and NSV representations retain strong separation relative to the year-swap null, with $z_{\mathrm{year}}=8.706$, 5.083, and 6.203, respectively. Each reaches the Monte Carlo minimum $p_{\mathrm{year}}\simeq0.00050$ and the cyclic-shift minimum $p_{\mathrm{shift}}\simeq0.0227$.
+
+\begin{table}[htbp]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\caption{Unified MJO results. Supplementary rows marked $\dagger$ do not determine the common-date set, but all cover it fully in this run. Probabilities are unadjusted.}
+\label{tab:mjo}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Representation & $d$ & $z_{\rm day}$ & $z_{\rm year}$ & $p_{\rm year}$ & $p_{\rm shift}$ & $R_{\rm year}$ & $S$\\
+\midrule
+BoM RMM & 2 & 2.317 & -1.004 & 0.8526 & 0.8182 & 0.753 & 0.012\\
+Own-RMM & 2 & 10.188 & 1.735 & 0.0525 & 0.1364 & 1.400 & 0.017\\
+Supervised, nb14 & 2 & 24.379 & 8.706 & 0.0005 & 0.0227 & 2.904 & 0.018\\
+Temporal SSL, nb15 & 2 & 22.620 & 5.083 & 0.0005 & 0.0227 & 2.232 & 0.050\\
+NSV, nb23 & 7 & 32.830 & 6.203 & 0.0005 & 0.0227 & 1.898 & 0.038\\
+Barlow D7$^\dagger$ & 7 & 32.797 & 2.711 & 0.0085 & 0.0227 & 1.476 & 0.184\\
+Barlow D3$^\dagger$ & 3 & 32.911 & 2.945 & 0.0070 & 0.0227 & 1.818 & 0.222\\
+Auxiliary 2D$^\dagger$ & 2 & 18.648 & 2.926 & 0.0115 & 0.0682 & 1.839 & 0.068\\
+Auxiliary 2D rebalanced$^\dagger$ & 2 & 18.089 & 3.037 & 0.0095 & 0.0909 & 1.790 & 0.069\\
+Auxiliary 3D$^\dagger$ & 3 & 19.458 & 2.845 & 0.0095 & 0.0682 & 1.650 & 0.054\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Barlow rows illustrate the importance of the reference distribution. Daily-null values near 33 reduce to year-null values of 2.71--2.95, accompanied by relatively large slow-variance fractions of 0.184--0.222. They retain unadjusted evidence under year swaps and cyclic shifts, but no longer dominate the comparison. The moisture-auxiliary rows have year-swap probabilities around 0.01 and shift probabilities above 0.05; their evidence is sensitive to the temporal null.
+
+For illustration, a Bonferroni correction across all ten MJO rows would use 0.005. Only the supervised, temporal-SSL, and NSV year-swap probabilities pass that threshold. This arithmetic does not resolve the additional dependence introduced by training, tuning, or model selection. The coarse shift test cannot attain 0.005 with only 44 blocks, so its minimum probability should be described as a limited-resolution robustness check.
+
+The absence of a detectable displacement in the official RMM plane is specific to this phase-conditioned centroid statistic and preprocessing. It does not demonstrate absence of physical ENSO--MJO interaction. The original RMM construction removes components of interannual variability \cite{wheeler2004}, and the operational BoM methodology changes after 2013 \cite{bom}. The project's own-EOF inputs and learned inputs differ from the official products. A controlled index-reproduction comparison is required before assigning the observed difference to any one preprocessing step.
+
+\subsection{Sensitivity to geometry, conditioning, and date selection}
+
+Changing the analysis configuration can materially alter the result. For MJO temporal SSL, replacing index-phase bins by its own angular sectors reduces $z_{\mathrm{year}}$ from 5.08 to 1.76. For MJO supervised embeddings the corresponding change is 8.71 to 3.84. These contrasts show that an apparent ENSO effect depends on which atmospheric states are regarded as belonging to the same phase.
+
+For MJO NSV, the common-date raw-coordinate statistic gives $z_{\mathrm{year}}=3.36$, compared with 6.20 after whitening. Whitening therefore strengthens this particular result; it need not strengthen every representation. For BSISO supervised embeddings, using the native active dates rather than the shared dates reduces the whitened statistic from 1.91 to 0.65. Common-date selection is scientifically consequential, not merely a bookkeeping convenience.
+
+These comparisons are not direct measures of physical effect amplification. A larger standardized statistic can reflect a change in observed separation, in the permutation mean, in the permutation spread, or in all three.
+
+\subsection{Permutation-seed stability}
+
+Notebook~35 repeats the year null with 20 seeds and 2,000 draws per seed, holding the embeddings, evaluation sample, whitening transform, and observed statistic fixed. Representative results are shown in Table~\ref{tab:seeds}.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Mean and standard deviation of $z_{\mathrm{year}}$ across permutation seeds. These spreads measure Monte Carlo variability of the estimated null, not sampling uncertainty in the atmospheric record.}
+\label{tab:seeds}
+\begin{tabular}{llcc}
+\toprule
+Mode & Representation & Mean $\pm$ SD & Range of $p_{\mathrm{year}}$\\
+\midrule
+BSISO & Supervised & $1.988\pm0.053$ & 0.0235--0.0435\\
+BSISO & Temporal SSL & $1.500\pm0.040$ & 0.0710--0.0980\\
+BSISO & NSV & $1.806\pm0.046$ & 0.0365--0.0515\\
+MJO & Own-RMM & $1.756\pm0.037$ & 0.0405--0.0615\\
+MJO & Supervised & $8.770\pm0.155$ & 0.0005--0.0005\\
+MJO & Temporal SSL & $4.995\pm0.080$ & 0.0005--0.0010\\
+MJO & NSV & $6.003\pm0.123$ & 0.0005--0.0005\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The broad contrast between weak BSISO evidence and stronger MJO learned-space association is stable to permutation seeds. Borderline cases can cross 0.05. Repeating seeds does not measure sensitivity to which ENSO years were observed, to encoder initialization, or to the training sample. Those questions require different resampling designs.
+
+\section{Scientific interpretation and limits of the present evidence}
+\label{sec:interpretation}
+
+The defensible empirical finding is that ENSO labels are associated with phase-conditioned locations in several saved MJO representations under the implemented year-history randomization. The corresponding BSISO evidence is weaker once temporal dependence is respected. This statement is narrower than claiming that a neural network has discovered a causal mechanism of ENSO modulation or that every learned representation is superior to the established indices.
+
+\paragraph{Label-informed training and independent inference.}
+Notebook~35 pools available training and validation embeddings. A year-based training split does not make a pooled displacement statistic an independent evaluation. For a representation trained using ENSO labels, keeping the learned coordinates fixed while permuting those same labels on training observations does not account for label-dependent representation fitting. Its nominal probability is therefore not calibrated evidence of independent ENSO discovery. A confirmatory analysis should use a frozen model and untouched test years, or a null procedure that repeats the complete label-dependent fitting and selection process. The pair-target mismatch identified in Section~\ref{sec:encoding} further limits interpretation of the supervised branch.
+
+\paragraph{Temporal self-supervision and physical specificity.}
+The temporal-SSL and NSV objectives do not explicitly use ENSO categories, which makes their associations scientifically interesting. However, temporal continuity or predictability can also favor seasonality, amplitude envelopes, and year-specific backgrounds. Calendar-month-preserving permutations address an important confounding route, but do not establish that the remaining signal is exclusively intraseasonal structural modulation. Conditioning more finely on season and amplitude, checking slow drift, and testing unseen years remain necessary.
+
+\paragraph{Phase information and ENSO information are different targets.}
+A space can retain ENSO-dependent structure while tracking intraseasonal phase poorly. Conversely, an index optimized to summarize the propagating intraseasonal mode can have a small ENSO centroid displacement. Displacement should therefore be read alongside phase probes, circular and lag correlations, autocorrelation, amplitude diagnostics, and physical-field composites. Strong ENSO separation alone is not evidence that a latent is a faithful BSISO or MJO phase coordinate.
+
+\paragraph{Magnitude, direction, and mechanism.}
+The scalar $D$ discards displacement direction. A large value does not reveal which winds, convection regions, or moisture structures changed. Phase-conditioned maps of El Ni\~no minus La Ni\~na anomalies, decoder reconstructions, and conditional predictions can connect the geometry to physical fields. Bootstrap uncertainty should accompany these maps and vectors. Geographic mechanisms should not be inferred from a cluster separation or phase number alone.
+
+\paragraph{Scope of comparison.}
+Whitening removes a class of coordinate arbitrariness, but comparisons still mix different dimensions, objectives, input filtering, and potentially data vintages. The result is an evaluation of the saved pipelines, not an isolated causal comparison of learning algorithms. Likewise, the larger MJO statistics do not prove intrinsically stronger physical coupling than BSISO: the two analyses use different domains, seasons, label definitions, and numbers of ENSO blocks.
+
+\section{Completed work and remaining research tasks}
+\label{sec:tasks}
+
+The repository has completed the MJJAS extension, added year-based splits in the main later training branches, implemented balanced ENSO probes in several later notebooks, and run the unified year-swap and shift tests. Notebook~35 also has saved real-data outputs for its 20-seed experiment. These items should not remain listed as wholly unimplemented tasks merely because they appear as open decisions in early project notes.
+
+The remaining tasks have the following order and evidence requirements.
+\begin{enumerate}
+\item \textbf{Resolve the label-informed training implementation.} Audit checkpoint provenance; ensure designated positives and negatives enter the loss with the intended roles; restrict every sampling fallback to its assigned split; then retrain affected comparisons. The current audit establishes the source-code mismatch, not its quantitative impact on each archived model.
+\item \textbf{Establish independent evaluation.} Freeze preprocessing, encoder selection, and hyperparameters before testing on unused years. Fit data-dependent transformations without test-label access and report a strictly held-out displacement statistic. If combining cross-validation folds, account for their separately learned coordinate systems rather than concatenating unrelated embeddings directly.
+\item \textbf{Quantify uncertainty across ENSO years.} Add year-block bootstrap intervals for $D_{\mathrm{obs}}$ and phase-specific displacement, together with leave-one-year or leave-one-event-out sensitivity. Distinguish uncertainty conditional on a frozen encoder from uncertainty that includes retraining. Do not substitute permutation-seed standard deviations for these intervals.
+\item \textbf{Repair and control preprocessing provenance.} Compare the existing MJJAS stored-record background subtraction with a continuous-calendar implementation using all-year data. Record snapshot versus daily-mean inputs, filter support, source-array hashes, checkpoint hashes, retained rank, and exact evaluation dates. Repeat relevant comparisons on matched upstream inputs.
+\item \textbf{Complete the index-reproduction ladder.} Notebooks~36--38 and notebook~35's Cell~12 are implemented, but saved real-climate validation and ladder outputs are not present in the reviewed codebase. Run notebook~36, then~37 and~38, followed by notebook~35 setup/loading and Cell~12. Validate the reproduced components and BSISO phase cross-tabulation before interpreting the ladder.
+\item \textbf{Respect the deferred ladder components.} The current RMM reproduction omits SST1 regression; the with-SST1 reproduction remains unavailable. The all-year ERA5 BSISO ladder step is deferred. Additional BSISO2 and four-PC displacement rows are outside the currently selected scope. None should be described as completed results.
+\item \textbf{Test physical specificity and multiplicity.} Prespecify the primary representations, null, and comparison family; control multiplicity; assess month/amplitude matching, slow trends, and phase occupancy. Report physical composites and independent prediction alongside latent distances. Use a distributional diagnostic if claiming information beyond conditional means.
+\item \textbf{Update the scientific record.} Replace unqualified legacy significance claims in summary documents with the unified results and their limitations. Preserve historical results with their configurations, including training implementation and data vintage, rather than silently overwriting their meaning.
+\end{enumerate}
+
+\appendix
+\section{Code inventory and dependency map}
+\label{app:code}
+
+Notebook numbers below refer to filenames in the repository. The unified calculation depends on the saved embeddings and labels, not on rerunning every training notebook. Files without a displacement calculation are included where they supply data, physical interpretation, or a pending control.
+
+\small
+\begin{longtable}{p{0.29\textwidth}p{0.65\textwidth}}
+\toprule
+Code location & Role in the ENSO-displacement analysis\\
+\midrule
+\endfirsthead
+\toprule Code location & Role in the ENSO-displacement analysis\\\midrule
+\endhead
+\path{notebooks/00_migrate_snapshot_to_daily.ipynb}; 01, 01b, 02, 03, 03b & Atmospheric-data migration/download, July-to-MJJAS extension, APEC and Ni\~no-3.4 labels, preprocessing, and amplitude-fill correction. These determine dates, fields, phase bins, and labels.\\
+\path{notebooks/04_training.ipynb}; 05; 06 & Historical 64D training; embedding extraction and original daily-shuffle displacement; physical composites and field-space comparisons. The 04/05 lineage includes Approaches A/B and Lee-style July/MJJAS variants.\\
+\path{notebooks/extension_2d/07_supervised_2d.ipynb}; 07b--07e & Label-informed 2D baseline, temperature sweep, no-$L_2$ outputs, collapse remedies, and dimension sweep. Notebook 07c supplies the principal BSISO supervised embedding read by 35.\\
+\path{notebooks/extension_2d/08_ssl_temporal_2d.ipynb} & BSISO low-pass inputs, temporal-pair SSL, latent coordinates, phase/ENSO probes, month diagnostics, marginal plots, and legacy displacement. Supplies the BSISO SSL row.\\
+\path{notebooks/extension_2d/09_lag_correlation.ipynb}; 10; 10b; \path{notebooks/01c_era5_precip_download.ipynb} & Phase alignment, precipitation prediction, and ENSO-stratified precipitation composites. Supporting physical diagnostics, not replacements for the unified displacement test.\\
+\path{notebooks/mjo/11_mjo_rmm_download.ipynb}; 12; 13; 13b & Official RMM and monthly ENSO labels, ERA5 inputs, standard meridionally averaged preprocessing, and the alternative latitude-resolved inputs.\\
+\path{notebooks/mjo/14_mjo_supervised_2d.ipynb}; 15; 16 & Principal MJO supervised and temporal-SSL embeddings; phase, lag, autocorrelation, physical composites, and own-sector displacement comparison. Notebooks 14b, 15b, and 16b provide the separate latitude-resolved experiments.\\
+\path{notebooks/nsv/17_nsv_bsiso_data.ipynb}; 17b; 18; 18b; 18c; 19; 20 & BSISO predictive-encoder development, filtering/lag variants, intrinsic-dimension estimation, and refined NSV coordinates. The evaluated branch is the lag-10, 4D representation from 20.\\
+\path{notebooks/nsv/21_nsv_mjo_data_stage1.ipynb}; 22; 23 & MJO predictive encoder, dimension estimation, and 7D refined NSV representation. Saved train/validation arrays are recombined by date for 35.\\
+\path{notebooks/mjo/24_mjo_rmm_pca_from_daily.ipynb}; 26; 27 & Own-RMM EOF baseline; temporal Barlow-Twins D3/D7 representations and displacement-direction diagnostics; trajectory visualization.\\
+\path{notebooks/mjo/28_mjo_moisture_download.ipynb}; 29--34 & Moisture data/preprocessing, physical diagnostics, 2D/3D auxiliary representations, latent-content comparisons, and RMM reconstruction from Barlow features. Notebooks 31/32 supply the auxiliary displacement rows.\\
+\path{notebooks/35_enso_displacement_unified.ipynb} & Authoritative shared implementation: date intersection, whitening, centroid statistic, daily/year/shift nulls, sensitivity configurations, real-data result tables, seed experiment, and pending index ladder.\\
+\path{notebooks/index_repro/36_index_repro_data.ipynb}; 37; 38 & Implemented input acquisition and RMM/BSISO reproduction controls. Scientific validation and real-data displacement-ladder outputs remain pending.\\
+\path{notebooks/diagnostic_drive_check.ipynb} & Artifact-availability diagnostic supporting execution on Drive; not an ENSO significance calculation.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+Within notebook~35, code-cell identifiers provide stable entry points: \code{c2-funcs} contains \code{whiten}, \code{phase_displacement}, \code{displacement_test}, \code{slow_fraction}, and \code{build_blocks}; \code{c4-loaders} performs date-aware loading; \code{c5-bsiso} and \code{c6-mjo} register representations; \code{c7-run} executes configurations; \code{c8-tables} and \code{c9-fig} report results; \code{c10-seeds} and \code{c11-fig} quantify Monte Carlo variability; \code{c12-ladder} evaluates index-reproduction controls.
+
+The ENSO marginal-plot cells in notebooks~07/07c, 08, 14, and~15 provide complementary diagnostics: raw coordinate marginals, phase-mean-removed marginals, and polar-coordinate summaries. They persist reloadable inputs and statistics under \path{results/enso_marginal/}. A marginal El Ni\~no--La Ni\~na difference can reflect different phase occupancy, whereas Equation~\eqref{eq:mean} compares centroids within phases; their statistics and permutation probabilities are not interchangeable. The opt-in artifact-clearing safeguards in notebooks~08, 15, and~15b are already implemented. The older \path{notebooks/mjo_moisture_constraints/README.md} contains additional proposed same-day Barlow and phase-dynamics experiments; these are research options, not evidence that those named experiments have been run.
+
+\section{Data products and result provenance}
+
+Paths in Table~\ref{tab:artifacts} are relative to the Google Drive project root \path{BSISO_SSL_Project/}. The Git repository primarily stores notebooks and textual reports; the large climate arrays, checkpoints, and numerical exports generally reside on Drive. Their listing here is a dependency inventory, not a claim that every upstream file was independently reloaded during this audit.
+
+\small
+\begin{longtable}{p{0.53\textwidth}p{0.41\textwidth}}
+\caption{Principal artifact dependencies and outputs.}\label{tab:artifacts}\\
+\toprule
+Artifact & Content or dependency\\
+\midrule
+\endfirsthead
+\toprule Artifact & Content or dependency\\\midrule
+\endhead
+\path{data/raw/BSISO.INDEX.NORM.LY.data}; \path{data/raw/nino34_monthly.txt} & Official BSISO PCs and NOAA anomaly source. Aligned labels retain date, phase, amplitude, and ENSO category.\\
+\path{data/processed/X_MJJAS_lee.npy}; \path{data/processed/labels_aligned_mjjas_lee_clean.csv} & Main BSISO tensor and cleaned metadata; 6,579 rows in the saved unified run. Uncleaned-label fallback exists in 35.\\
+\path{data/processed/X_MJJAS_lee_lp25.npy}; \path{data/processed/labels_aligned_mjjas_lee_lp25.csv} & Filtered BSISO states and retained dates; 4,429 rows.\\
+\path{results/lee_2d_no_l2_v2/embeddings.npy}; \path{results/lee_2d_ssl_v2/embeddings.npy} & Principal BSISO supervised and temporal-SSL coordinates; their row axes differ and require their respective labels files.\\
+\path{nsv/state_vars_lag10/v_train.npy}; \path{nsv/state_vars_lag10/v_val.npy}; \path{nsv/latents_lag10/} & BSISO 4D NSV outputs plus \code{train_mask.npy} and \code{dates_t.npy}; 3,999 combined states.\\
+\path{MJO/data/processed/X_MJO.npy}; \path{MJO/data/processed/labels_aligned_mjo.csv} & Main MJO fields, official PCs, phase, amplitude, monthly ENSO labels, and weak-MJO flag; 16,436 rows.\\
+\path{MJO/data/processed/X_MJO_bp20_90.npy}; \path{MJO/data/processed/labels_aligned_mjo_bp20_90.csv} & Band-passed MJO states and dates; 16,256 rows.\\
+\path{MJO/data/processed/mjo_rmm_own_pcs.npy}; \path{MJO/results/sup/embeddings.npy}; \path{MJO/results/ssl/embeddings.npy} & Own-RMM, supervised, and temporal-SSL coordinates read by 35.\\
+\path{MJO/nsv/state_vars_lag10/}; \path{MJO/nsv/latents_lag10/} & MJO 7D NSV coordinates and date/mask reconstruction information; 16,076 combined states before common-date selection.\\
+\path{MJO/barlow/embeddings_z7.npy}; \path{MJO/barlow/D3/embeddings_z7.npy} & Seven- and three-dimensional Barlow outputs. The filename \code{z7} is retained even for D3; use array shape to determine dimension.\\
+\path{MJO/moisture_constraints/results/} & \code{aux2d}, \code{aux2d_rebal}, and \code{aux3d} embedding subdirectories. Moisture targets are produced by 28/29.\\
+\path{results/enso_displacement_unified/} & \code{zscores_all.csv}, \code{zscores_headline.csv}, \code{per_phase_headline.csv}, \code{summary.md}, \code{bsiso_own_pcs.npz}, and comparison figure.\\
+Same unified-result directory & \code{z_year_by_seed.csv}, \code{z_year_seed_summary.csv}, \code{nulls_year_by_seed.npz}, and seed-sensitivity figure. Real-data execution is documented in saved outputs.\\
+\path{data/index_repro/} & Planned/implemented ladder inputs: \code{rmm_wh04_repro.npz}, \code{rmm_wh04_era5.npz}, and \code{bsiso_lee_repro.npz}. The ladder writes \code{index_ladder.csv} and \code{index_ladder.png}. Real-data outputs are not yet documented.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+The reviewed local September~23 exports provide matching BSISO scalar and per-phase values used in Section~\ref{sec:results}. Their MJO SSL row is an earlier result ($z_{\mathrm{year}}=5.0066$), whereas the saved notebook~35 headline reports 5.083. The main tables use the latter consistently; the two versions should not be merged into one apparent run.
+
+The source record also includes \path{results/analysis_results.md}, \path{results/analysis_results_B.md}, \path{results/analysis_results_lee_mjjas.md}, \path{results/extension_2d_analysis_report.md}, \path{results/project_conclusions.md}, \path{results/project_summary.md}, \path{results/summary_upto_260623.md}, and \path{results/conversation_log.md}. Sessions~62b--65 of the repository log contain the historical inventory, unified analysis, seed results, and index-reproduction status. Earlier conclusions in these reports can be superseded by later code or evidence.
+
+\section{Historical displacement results and their interpretation}
+
+Table~\ref{tab:legacy} preserves the principal legacy results recorded in the codebase. They use daily label shuffling, raw representation units, differing samples, and pooled available embeddings. They are not directly comparable effect sizes and should not be presented as the headline inference after notebook~35.
+
+\small
+\begin{longtable}{p{0.64\textwidth}p{0.29\textwidth}}
+\caption{Legacy daily-null statistics. Values are historical records, not reruns under the unified configuration.}\label{tab:legacy}\\
+\toprule
+Experiment and configuration & Recorded $z_{\mathrm{day}}$\\
+\midrule
+\endfirsthead
+\toprule Experiment and configuration & Recorded $z_{\mathrm{day}}$\\\midrule
+\endhead
+BSISO 64D July, Approach A / B / Lee & 11.02 / 9.85 / 10.82\\
+BSISO 64D MJJAS, raw day-of-year climatology & 4.79\\
+BSISO 64D MJJAS, harmonic correction, random / year split & 2.60 / 3.83\\
+BSISO 2D unit-normalized, $\tau=0.07$ / $0.5$ & 1.54 / 2.59\\
+BSISO 2D no-$L_2$, earlier 128-channel / 32-channel variant & 2.53 / 3.76\\
+BSISO collapse sweeps, selected variance/covariance-regularized configurations & 6.56 / 6.16\\
+BSISO dimension sweep, $d=1,2,4,8,16,32,64$ & 0.84 / 5.81 / 6.33 / 8.78 / 9.19 / 12.28 / 17.21\\
+BSISO temporal SSL, earlier 128-channel / 32-channel variant & 10.70 / 14.55\\
+BSISO NSV, refined 4D / preceding 64D features & 12.50 / 10.80\\
+MJO official RMM, earlier notebook~16 comparison & 4.10\\
+MJO supervised, official-phase / own-sector bins & 22.46 / 12.21\\
+MJO temporal SSL, official-phase / own-sector bins & 18.74 / 13.44\\
+MJO latitude-resolved supervised & 19.82; collapse concern\\
+MJO latitude-resolved SSL, different recorded runs & 13.26 / 22.53; seasonal concern\\
+MJO NSV, refined 7D & 20.88\\
+MJO Barlow D7, earlier linear / steep lag weighting & 34.68 / 33.99\\
+MJO Barlow D3 & 27.51\\
+MJO moisture auxiliary 2D / rebalanced 2D / 3D & 19.4 / 18.5 / 13.3\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+Most original neural tests use 100 daily permutations; the earlier NSV and notebook~16 comparisons use 1,000, and the moisture-auxiliary tests use 200. Original BSISO tests generally include weak as well as active days, while the MJO displacement tests generally select active days. The historical BSISO NSV value 12.50 conflicts with an 11.0 value in an older project summary; the detailed run record supports 12.50. The later saved embeddings need not reproduce these numbers exactly because models, input vintages, date restrictions, and configurations have changed.
+
+Additional notebook~07d sweep records include 8.38 for a raw-loss configuration, approximately 9.8--11.2 for selected lower-learning-rate runs, and 2.40/2.05 for other batch-64 configurations. Notebook~07e records three-seed summary values of 5.45 at $d=2$ and 6.50 at $d=4$. These tuning results belong to the historical model-selection record; selecting the largest displacement from such sweeps would require accounting for that selection in any subsequent significance claim.
+
+The original July phase-probe accuracies, 67.4\% for Approach~A and 59.2\% for Approach~B, are classification results rather than ENSO displacement statistics. Their existence does not validate the original daily-shuffle inference. Similarly, an increase in a pooled displacement statistic after changing a training split is not evidence that displacement generalizes to unseen years.
+
+\begin{thebibliography}{9}
+
+\bibitem{lee2013}
+Lee, J.-Y., Wang, B., Wheeler, M.~C., Fu, X., Waliser, D.~E., and Kang, I.-S. (2013).
+Real-time multivariate indices for the boreal summer intraseasonal oscillation over the Asian summer monsoon region.
+\emph{Climate Dynamics}, 40, 493--509.
+\href{https://doi.org/10.1007/s00382-012-1544-4}{doi:10.1007/s00382-012-1544-4}.
+
+\bibitem{wheeler2004}
+Wheeler, M.~C., and Hendon, H.~H. (2004).
+An all-season real-time multivariate MJO index: Development of an index for monitoring and prediction.
+\emph{Monthly Weather Review}, 132, 1917--1932.
+\href{https://doi.org/10.1175/1520-0493(2004)132<1917:AARMMI>2.0.CO;2}{doi:10.1175/1520-0493(2004)132\textless1917:AARMMI\textgreater2.0.CO;2}.
+
+\bibitem{winkler2015}
+Winkler, A.~M., Webster, M.~A., Vidaurre, D., Nichols, T.~E., and Smith, S.~M. (2015).
+Multi-level block permutation.
+\emph{NeuroImage}, 123, 253--268.
+\href{https://doi.org/10.1016/j.neuroimage.2015.05.092}{doi:10.1016/j.neuroimage.2015.05.092}.
+
+\bibitem{bom}
+Bureau of Meteorology.
+Madden--Julian Oscillation monitoring: RMM methodology note.
+\url{https://www.bom.gov.au/climate/mjo/}.
+Accessed 7 October 2026.
+
+\end{thebibliography}
+\end{document}
+% miao
