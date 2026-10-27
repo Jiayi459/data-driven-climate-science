@@ -33,6 +33,13 @@ data-driven-climate-science/
    jupyter lab
    ```
 
+## Toy oscillator validation
+
+The [L1 pendulum experiments](notebooks/toy_pendulum/README.md) use self-contained
+Colab notebooks **39–42** for simulation, NSV, InfoNCE/Barlow Twins and held-out
+evaluation. Start with `39_pendulum_data.ipynb`; all outputs use a separate
+`BSISO_SSL_Project/toy/pendulum/` folder on Google Drive.
+
 ## Author
 
 - **Jiayi** — jh9141@nyu.edu

@@ -5780,6 +5780,7 @@ Extra † rows in nb35 with the headline config; each step changes one thing.
 ### Risks
 
 1. **SST1** is BoM-internal; no known public download. Options: ask BoM, re-derive per D&C 2001, or bracket with a Nino-3.4 proxy vs no SST1.
+   - **Correction (2026-10-07):** a public BoM SST1/SST2 monthly table has now been located at https://www.bom.gov.au/climate/ahead/sst_data_table.html (1949-01 to 2023-11 in the inspected page). The earlier no-public-download assumption is superseded. Historical version equivalence and daily-conversion details still require validation; see the SST1 public-source follow-up below.
 2. **Dataset versions:** current PSL OLR / NCEP files may differ slightly from those the authors used.
 3. **Official files after 2004 / 2012 are real-time calculations,** so comparisons are restricted to the definition periods.
 
@@ -5918,6 +5919,14 @@ Sources: WH04 author-uploaded article (https://www.researchgate.net/publication/
 
 > Next: user runs nb38 (B1), then nb35 Cells 10-12b; sends nb37's Cell 5 tables (r per period, canonical, explained variance), the Cell 12 ladder and both Cell 12b tables.
 
+### B1 missing: likely Google Drive quota (2026-10-07)
+
+The user had run nb38, but `bsiso_lee_repro.npz` never reached Drive; the user suspects Drive storage is full.
+
+- **nb36 footprint (estimate):** combined npz about 0.45 GB plus `data/index_repro/yearly_cache/` about 0.4 GB. The cache only duplicates the combined files and is safe to delete once they exist.
+- **Drive trash counts toward the quota**, so files deleted from Colab only free space once the trash is emptied.
+- **Next:** free space, re-run nb38 and confirm its "saved" line, then nb35 Cells 12-12b.
+
 ---
 
 *Log maintained by Claude Code and Codex. Updated each session.*
@@ -5940,3 +5949,252 @@ Tasks distinguished: MJJAS extension, later year splits/balanced probes, nb35 un
 Validation: all 15 headline rows matched programmatically to saved nb35 stdout; LaTeX environments/braces, cross-references and bibliography checked. No local TeX engine was available, so the source was not compiled/rendered.
 
 Follow-up: user requested committing the LaTeX synthesis and conversation-log update and pushing them to GitHub origin/main. This publication contains documentation only; analysis notebooks remain unchanged.
+
+### Chinese explanation of the RMM reproduction ladder (2026-10-07)
+
+User requested a Chinese explanation of the supplied R0/R2/R3/R4 interpretation. Explained that higher ENSO-displacement z measures separation relative to the chosen permutation null, not MJO-index quality; slow ENSO background projecting into the MJO plane can increase separation without demonstrating modulation of intraseasonal dynamics. Official RMM's weak displacement is consistent with its background-removal design, but is not proof of absent physical ENSO modulation. Missing SST1 is a candidate explanation for R0 versus R2, not an isolated causal finding; the largest reported adjacent increase is R2 to R3 (0.48 to 2.14), associated with switching input data to ERA5. Residual slow signal in ERA5 OLR remains a hypothesis.
+
+Statistical wording: R2 p=0.30 gives no clear evidence against the null; R3 p=0.025 is nominally significant in a single unadjusted 5% test, so “none significant” is too strong; R4 p=0.052 is just above that threshold. Lack of significance does not establish absence. Larger learned-latent z values do not alone establish a superior index or physical ENSO modulation; background controls and independent evaluation remain necessary. This was an explanation of supplied results, not a new literature verification or analysis run. No analysis code or LaTeX source changed.
+
+
+### SST1 regression definition clarified (2026-10-07)
+
+User asked about SST1 regression. Verified WH04 Section 2b (p. 1919) using the original paper hosted by BoM: https://www.bom.gov.au/climate/mjo/about/WH04.pdf . SST1 is the time series of the first rotated EOF of Indo-Pacific SSTs (Drosdowsky and Chambers 2001), an ENSO proxy rather than the Nino-3.4 index itself. After seasonal-cycle removal, monthly SST1 values are converted to daily values; each atmospheric field/grid point is regressed on SST1 separately for each calendar month, with monthly regression parameters interpolated to a daily seasonal relationship. Subtract the fitted relationship from OLR/u850/u200 before EOF analysis/projection, then subtract the previous-120-day mean. Explained a simplified regression residual formula and an illustrative OLR subtraction. The regression removes an additive component linearly associated with SST1, not all possible ENSO modulation or all non-MJO variability. The running mean is complementary, not an exact substitute. JMA's official methodology independently describes SST1 and explicitly identifies its own NINO.3 substitution: https://www.data.jma.go.jp/tcc/data/products/clisysJRA3Q/mjo/explanation_mjo.html . Applied academic-research-suite in focused source-verification mode. No scientific code or manuscript edits.
+
+
+### SST1 public source located; previous data-access blocker corrected (2026-10-07)
+
+User asked whether SST1 regression requires an additional download whose path is unavailable. Rechecked the project notebooks and official web sources. Nb37 currently deliberately skips SST1 (`USE_SST1 = False`); it does not yet implement the with-SST1 reproduction. Contrary to the earlier log's assumption that no public series was known, the BoM page https://www.bom.gov.au/climate/ahead/sst_data_table.html is accessible through web browsing, titled “Amplitudes of SST1 and SST2 EOFs”, and lists monthly rows from 1949-01 through 2023-11. This spans the 1979-2001 EOF fitting period and the 1979-2022 comparison period; it does not supply December 2023 in the inspected version.
+
+Primary-source cross-check: Lo et al. (2007), “Probabilistic Forecasts of the Onset of the North Australian Wet Season”, explicitly identifies this same URL as the source of Drosdowsky and Chambers SST1: https://journals.ametsoc.org/view/journals/mwre/135/10/mwr3473.1.xml . Thus the public-source blocker is resolved at the identification/read-access level. The old mention of an available `sst1.txt` file was not a verified endpoint and should not be used. The remaining tasks are to ingest/validate this monthly series, specify daily conversion and regression details, and verify equivalence to the historical WH04 input before claiming exact reproduction. No nb36/nb37 changes, dataset ingestion, or analysis runs were performed for this clarification.
+
+---
+
+## Session 67 — SST1 regression added to the RMM reproduction (R1) + nb38 real results (2026-10-07)
+
+**Request:** add SST1 from https://www.bom.gov.au/climate/ahead/sst_data_table.html, convert it to daily, add WH04's regression removal, and validate against the historical WH04 (BoM) RMM.
+
+### SST1 source facts
+- The BoM page "Amplitudes of SST1 and SST2 EOFs" has rows `YYYY MM SST1 SST2` from 1949-01 to 2023-11: 899 months, no gaps.
+- El Niño is positive (1997-12 = +2.94).
+- The 1979-2001 mean is +0.37, not 0, so the regression needs an intercept.
+- The BoM RMM file header says the official RMM is "WH04 method" (SST1 + 120-day removal) from 1974-06 to 2013-12. From 2014-01 it is "Gottschalck10 method, OLR & ACCESS wind" (120-day removal only). The official index therefore contains SST1 only up to 2013.
+
+### nb37 (rebuilt; same cell ids)
+- **Cell 2, SST1 loader** (sources in order):
+  1. the cached `data/index_repro/sst1_monthly.csv`;
+  2. else a saved page at `data/raw/sst_data_table.html`;
+  3. else `requests` to BoM.
+
+  The page is parsed by regex and cached as the CSV. Two daily conversions: `step` (each day takes its month's value) and `interp` (linear between mid-months).
+- **Cell 2, phase-convention check:** the BoM `phase` column is compared with the WH04 phases computed from the BoM RMM1/RMM2.
+- **Cell 3, `remove_sst1`:** applied after the annual cycle and before the 120-day mean.
+  - For each calendar month and longitude: OLS with intercept of the 15S-15N anomalies on daily SST1, fitted over 1979-2001.
+  - The 12 (intercept, slope) pairs are placed on the 15th of each month and interpolated periodically to a 365-day cycle; the fitted value is subtracted.
+- **Cell 4, grid:** 16 variants = 120-day window (excl/incl today) × annual fit (doyclim/direct) × meridional mean (mean/cos) × SST1 daily conversion (step/interp).
+  - Score: mean r with the official RMM over 1979-2001. Ties within 0.001 go to 8401 EOF days.
+  - The best variant is **R1**. **R2** is the same configuration with SST1 switched off.
+- **Cell 5:** the paper table for R1, then R1 and R2 vs the official RMM for 1979-2001, 2002-2013 and 2014-2022, then a "mean r gain from SST1 by period" line.
+- **Cell 7:** new figure `rmm_sst1_regression.png` (DJF/JJA slopes vs longitude per field).
+- **Cell 8:** saves `rmm_wh04_repro_sst1.npz` (R1), `rmm_wh04_repro.npz` (now R2 = R1 config without SST1) and `rmm_wh04_era5.npz` (R3), each with a read-back check against a full Drive.
+
+**Expected if the reproduction matches BoM:**
+- R1 r ≥ 0.99 in 1979-2013.
+- The SST1 gain is positive in 1979-2001 and 2002-2013, and about 0 or negative in 2014-2022.
+
+### nb35
+- Cell 10 seed check now includes R1.
+- Cell 12 ladder now has R0 / R1 / R2 / R3 / R4, and the figure height scales with the number of rows.
+- Cell 12 header and the Cell 12b markdown were updated: R1 should sit close to R0 if SST1 explains the R0-R2 gap.
+
+### Tests (local, mock data)
+- nb37 runs end to end (16 variants, about 4.5 min locally) and saves and reads back all three npz files.
+- The mock's r values are meaningless because its EOF1/EOF2 are a degenerate pair.
+- An earlier mock with an injected SST1 signal gave R1 r 0.992/0.992. That mock script was lost when the scratchpad was wiped.
+- nb35 code cells parse. Cell 12 skips any missing npz.
+
+### nb38 real results (B1, from the user's Colab run, commit 87db15b)
+- **Exact reproduction:** r with APEC is 1.000 / 1.000 / 0.999 / 1.000 (PC1-4, MJJASO 1981-2010) and 0.997 in 2011-2022. Explained variance is 7.2 / 4.9 / 3.8 / 3.5 %, as in Lee et al. 2013.
+- **Selected variant:** incl_today|doyclim|meanstd|none, with normalisation 31.79 / 3.81. The variant excl_today|rmsstd gives 33.08 / 4.011 (paper: 33.04 / 4.01) and PC SDs of 12.13 / 10.00 / 8.86 / 8.41, matching the paper. The r score cannot tell these apart, so the published factors could be used as the tie-break.
+- **Spectra:** the 30-60 d fractions are lower than the paper's. This is a method difference (FFT fraction vs their spectral estimate).
+- **Open sign question:** PC1-RMM2 is -0.65 and PC2-RMM1 is +0.48, while the paper has -0.48. This raises a question about the APEC PC2 sign / Lee phase convention, to be checked with composites.
+- **Cell 6:** the +2 phase-mapping check is 1.000, but it only checks the formula.
+
+> Next: on Colab, re-run nb37 (all cells), then nb35 Cells 1-8 and 10-12b. Send nb37 Cell 2 (SST1 + phase-convention lines), Cell 4 (grid top + R1/R2), Cell 5 (both tables + SST1 gain line), `rmm_sst1_regression.png`, and the nb35 Cell 12 ladder and 12b tables.
+
+---
+
+## Session 68 — Why the official indices give z ≤ 0 and our reproductions z > 0 (2026-10-27)
+
+**Question:** the official indices have negative ENSO-displacement z (R0 -0.90, B0 -0.40), while our reproductions and own EOFs are positive (R2 0.48, R3 2.14, R4 1.77, B3 1.27). What is the physical meaning? (Explanation only; no code changed. The R1 / Cell 12b results are not back yet.)
+
+1. **The sign is not physics.**
+   - D is a distance (≥ 0) and has no direction. A negative z only means the EN/LN separation is below the mean of the random year relabelings.
+   - R0 (p 0.81), B0, R2 (p 0.30) and B3 are all at chance level. Only R3 (p 0.025, p_shift 0.068) and R4 (p 0.052) are borderline.
+   - So the real question is why our versions sit about 1.5-3 z units higher.
+2. **Why D cannot tell background from modulation.** The EN-LN centroid difference Δ_p in each phase has two parts. Both raise D.
+   - **(a) Common translation, the same vector in every phase.** ENSO's mean state or slow background projects onto the index plane. El Niño's wet central Pacific / dry Maritime Continent looks like RMM phases 6-7. This is contamination.
+   - **(b) Phase-dependent part.** A radial component is an amplitude change; a tangential component is a propagation or phase-speed change. This is genuine modulation.
+3. **R0 sits at or below 0 by construction.**
+   - WH04 remove the SST1-linear part (BoM: 1979-2013 only), which kills (a).
+   - Removing the ENSO-linear part with the true ENSO history, then testing against a year null that does not redo the removal, biases z negative. The true grouping is orthogonalised; random groupings are not. The Session 66 no-signal mock gave z ≈ -2 for this naive set-up.
+   - So R0's z is not on the same footing as R2-R4.
+   - B0 (Lee 2013) has no SST1 step, so its -0.40 is just noise (7 EN / 11 LN years).
+4. **Why our versions are positive.**
+   - **R2:** the 120-day mean only removes ENSO's level, not its within-120-day change. In the developing season the residual ≈ ENSO tendency × about 60 d, so a little background leaks in.
+   - **R2 -> R3 (+1.66):** the data change (ERA5 model OLR/winds vs NOAA OLR + NCEP R1) is the largest jump. This is still a hypothesis.
+   - **B3, a concrete leak (verified in the code):**
+     - nb03 `remove_running_mean` uses an integer 120-row window on the concatenated MJJAS-only series. From 1980 on, the "previous 120 days" for May 1 to about Aug 28 come partly or wholly from the previous summer; that is 78% of MJJAS days.
+     - The anomaly therefore ≈ this year's slow anomaly minus last summer's, which is a year-to-year (ENSO transition) signal.
+     - The same input X_MJJAS_lee feeds the BSISO sup/SSL models.
+     - X_MJO (nb13) is continuous all-month daily data, so the MJO rows are not affected by this.
+5. **Implication for the learned latents.** The MJO sup / NSV / SSL latents (z 8.7 / 6.2 / 5.0) are trained on X_MJO (ERA5, 120-day mean only, no SST1). The same background-vs-modulation test applies to them.
+
+**Tests that decide it:**
+- **R1 (SST1 rerun):** if R1 ≈ R0, SST1 explains R0 vs R2.
+- **Cell 12b ENSO-linear removal (redone inside every null draw):** if the z of R3/R4 falls to about 0, the positive z was background (a).
+- **Proposed new diagnostic (not implemented):** split Δ_p into its common mean and the phase-dependent residual, and the residual into radial and tangential parts.
+- **B3:** fix the nb03 window (per-year reset, or the running mean on continuous daily data before cutting to MJJAS) and re-test.
+
+---
+
+## Session 69 — PLAN: toy dynamical systems with known ground truth to validate SSL / NSV / Barlow Twins and the ENSO-displacement test (2026-10-27)
+
+**Request:** validate the methods on an oscillation-like system that is simpler than ENSO/MJO (e.g. pendulum, reaction-diffusion). Planning only; no code was written.
+
+### Why a slow-fast toy, not only a pendulum or reaction-diffusion
+The open questions are about **slow background vs modulation**, **year-level null calibration**, and **what an extra NSV dimension means**. A plain pendulum or RD system has no slow ENSO-like driver and no year-block autocorrelation, so it can only test NSV/Barlow in isolation.
+- **L1, noisy damped pendulum** (rendered into the MJO format): NSV unit test with a published answer (Chen et al.: ID = 2). With slow per-year length L: ID = 3. Barlow should pick out L, InfoNCE the swing phase.
+- **L2, main testbed: slow-fast coupled oscillator on a ring, in MJO format (N,3,1,180).**
+  - Slow: a stochastic recharge oscillator (period about 4 yr) gives s(t), and ENSO labels follow nb11's rules.
+  - Fast: a stochastic Stuart-Landau oscillator z (period about 45 d, damped, noise-driven). The true phase is arg z and the true amplitude is |z|.
+  - Fields: Re z, Im z projected onto the real WH04 EOFs from nb37, shifted east by δ_x·s and scaled by (1+δ_A·s); plus α_bg·s·B, where B is the real X_MJO regression on Nino-3.4; plus a seasonal cycle and AR(1) red noise (τ about 4 d, about 50% of the variance).
+  - The fields then go through the nb13 preprocessing and a toy WH04 EOF index, which fill the rmm1/rmm2/phase columns. Truth goes in separate columns plus truth.npz.
+- **L3, CGLE (complex Ginzburg-Landau) reaction-advection-diffusion on a ring:** growth is localised over a warm pool whose position shifts with s. This is the nonlinear, emergent-pattern robustness check.
+
+### Scenarios (each knob alone, then mixed)
+- S0: null.
+- S1: background only (α_bg), i.e. Session 68's contamination (a).
+- S2: amplitude modulation, radial.
+- S3: propagation / eastward-extension modulation, tangential.
+- S4: frequency modulation. It is invisible to snapshot composites.
+- S5: S1 + S2 + S3.
+
+Settings: noise r in {0, 0.5, 0.8}; NSV lag in {1, 10}; 45 yr (the real setting) and 200 yr; s taken from the synthetic recharge oscillator or from the real Nino-3.4 history.
+
+**Ground-truth ID for a single-snapshot encoder:**
+
+| scenario | ID | reason |
+|---|---|---|
+| S0 | 2 | |
+| S1 | 3 | s is visible in a snapshot |
+| S2 | 2 | s cannot be separated from \|z\| |
+| S3 | 3 | s is visible when the oscillation is active |
+| S4 | 2 | s is not visible |
+| S5 | 3 | |
+
+So d̂ tells us whether ENSO is visible in a snapshot, not whether ENSO modulates. This bears directly on the Session 26/32 reading of BSISO d̂ = 4.
+
+### Pre-registered predictions (to log before running)
+- **S0:** z_year is about N(0,1) with a false-positive rate of about 5%. z_day is inflated, most for Barlow.
+- **S1:** every latent that sees s gives z > 0. Barlow gives z ≫ 0 although there is no modulation.
+- **S3:** the index and NSV detect it, and Barlow is weak because it is phase-blind.
+- **S4:** every snapshot representation gives z ≈ 0. Only a phase-speed test (mean dφ/dt by phase, EN vs LN, year null) detects it.
+- **Δ_p decomposition** (proposed in Session 68): S1 should be common translation, S2 radial and S3 tangential.
+
+### Stages and gates
+- **0. Simulator + realism calibration (nb39, CPU).** Gate G0: EOF variance share, PC spectrum/ACF, EN/LN year counts and background regression amplitude are within about ±30% of the real X_MJO values.
+- **1. Index-level calibration (nb40, CPU).** At least 200 seeds per scenario, using the oracle (Re z, Im z) and the toy EOF index, with the nb35 functions. It covers the false-positive rate, power curves (including the BSISO-like 7 EN / 11 LN year layout), the Δ_p decomposition, 120-day mean / SST1-like removal and the phase-speed test. Gate G1: the year-null false-positive rate is between 3% and 7%.
+- **2. Pendulum NSV unit test.** Gate G2: d̂ = 2 ± 0.3 with fixed L and 3 ± 0.3 with slow L. If it fails, debug the NSV code before reading the real d̂ = 4 / 7.
+- **3. Learned latents on L2.** The core scenarios are S0, S1, S3 and S5, with S2 and S4 later. Methods: nb15 SSL, nb21-23 NSV and nb26 Barlow (warm- and cold-start); nb14 sup is optional, after the sampler fix.
+  - Each encoder is trained once per scenario, frozen, and evaluated on about 20 held-out realizations. This gives the false-positive rate and power for learned latents, and it is the strictly held-out displacement test.
+  - Cost: about 6-10 T4 GPU-hours.
+- **4. CGLE robustness.** Repeat the S1 vs S3 contrast.
+- **5. Scorecard (nb42) and mapping back to the real results.** Example: if S1 with the real-calibrated α_bg already gives SSL z_year ≈ 5, the real MJO SSL 5.0 cannot be told apart from leakage.
+
+### Implementation notes
+- New folder `notebooks/toy/`. Each toy realization is written to `BSISO_SSL_Project/toy/<system>_<scenario>_seed<k>/data/processed/` using the MJO file names.
+- Reused notebooks get an env-var `MJO_DIR` override. Toy outputs must never write to real result dirs (nb15 `PERSIST_DIR`, nb26 hard-coded paths, and the Session 63 stale-clear lesson).
+- The nb35 Cell 4 functions should be factored into a shared module.
+- Stage 1 seeds are generated on the fly and not saved, because of the Drive quota.
+- Unverified: log line 2906 gives the Chen et al. reaction-diffusion ID as "≈20". I recall the λ-ω spiral as ID 2; check against the paper.
+
+**Open decisions (user):**
+1. MJO-format ring first (recommended: all three methods exist there) or the BSISO 2-D grid?
+2. s source: synthetic, real Nino-3.4, or both (recommended: both).
+3. Include supervised nb14?
+4. Shared src module or inline copies?
+5. Start with the core scenarios only?
+
+
+### Session 69 follow-up — Oscillator choice and a testable method-validation plan (2026-10-27)
+
+User asked which simpler oscillation-like dynamical systems should validate self-supervised learning, NSV and Barlow Twins, what properties they need, and which questions they should answer. Applied academic-research-suite / experiment-agent in plan mode, inspected the current MJO NSV and temporal BT notebooks and prior project notes, and checked original NSV and Barlow Twins publications plus the CGLE reference. No simulation or training was run; no scientific notebooks were edited.
+
+Saved the detailed proposed design to `results/toy_oscillator_validation_plan.md`. Recommendation: (1) slow-environment-modulated Stuart–Landau as the main benchmark, (2) a 1D oscillatory CGLE reaction–diffusion system for spatial propagation and perturbation robustness, (3) an optional multi-initial-condition pendulum for observability/state-recovery checks. Start with quasi-static environment parameters and separately switch on additive observation background, amplitude dynamics and frequency dynamics; add an explicit slow oscillator and mixed effects later. Use synthetic observation modes first, real EOFs/preprocessing only in a later climate-interface stage.
+
+Core questions: state recovery, loss/view bias toward fast phase or slow information, background-versus-dynamics interpretation, predictive sufficiency and generalization. Compare InfoNCE, predictive NSV, temporal BT and same-time-noise-view BT against PCA/delay-PCA and linear dynamics. Match input history/backbone and initialization budgets; evaluate encoder and projector separately. Labels are simulator/evaluation truth, not training targets for SSL.
+
+Important qualifications to the earlier Session 69 draft: one image of a pendulum generally lacks angular velocity; frequency-only modulation can be invisible to a matched-phase snapshot distribution; a one-dimensional limit-cycle manifold differs from a two-coordinate continuous embedding and from transient state dimension; geometric ID is not automatically a physical-variable count. Temporal BT has a calculable invariance penalty for rotating phase, but its failure is not universal. Nonlinear encoders can turn additive backgrounds into phase-dependent latent displacements, so radial/tangential residuals alone do not establish dynamical modulation. S1 background association is real observation-level dependence, not a statistical false positive for that association null. Do not assume standardized permutation z is normal or demand a 3–7% empirical rejection rate from only 200 repeats without uncertainty. Runtime estimates and exact gates remain pilot-dependent.
+
+Validation plan: independent-trajectory splits, training-only preprocessing/probes, short-window ablation, circular phase/amplitude/slow-variable recovery, common-target multistep prediction, intervention-response checks, trajectory-level uncertainty, and separate evaluation of sampling versus training-seed variability. No claims of successful toy experiments or real-climate mechanism validation were made.
+
+Sources: https://arxiv.org/html/2112.10755 ; https://github.com/BoyuanChen/neural-state-variables ; https://proceedings.mlr.press/v139/zbontar21a.html ; https://arxiv.org/html/cond-mat/0106115 .
+
+### Session 69b — Converged plan file + webpage discussion (2026-10-27)
+
+- **`results/toy_oscillator_validation_plan.md` (v1, untracked, 12:30) replaces the Session 69 draft in several places.** It keeps the slow-fast + background-control + CGLE direction. The Stuart–Landau model is the core, with synthetic patterns first; real EOFs and real Nino-3.4 come later.
+- **It corrects these points in the Session 69 draft:**
+  1. Single-frame IDs are not fixed in advance.
+  2. A static pattern shift is an observation mechanism, not a change in propagation.
+  3. z is not exactly N(0,1).
+  4. It does not assume that BT loses phase.
+  5. GPU hours and the 3–7% gate are to be re-set after the pilot. With 200 runs at p = 0.05, the binomial 95% interval is about ±3%.
+
+  Claude reviewed these corrections and agrees with them.
+- **The user asked about the purpose, method and design of a webpage version.**
+  - Purpose: a page others can read, plus an interactive toy lab (sliders a / b / γ; phase plane, Hovmöller, per-phase displacement and phase speed). The lab shows S1 against S3 directly.
+  - Method: a single-file HTML artifact derived from the md. The md stays the source of truth.
+  - Nothing has been built yet. Audience, language and scope are pending the user's choice.
+
+
+### Session 69 decision — Start with L1 noisy damped pendulum (2026-10-27)
+
+User chose L1 noisy damped pendulum first, L2 slow–fast toy ENSO/MJO oscillators on a ring as the main testbed, and L3 CGLE on a ring for spatial robustness. Updated `results/toy_oscillator_validation_plan.md` to v2_pendulum_first, moving pendulum from optional to the first experiment and revising the execution stages and proposed notebook names. Planning only: no simulator, notebook implementation, training, or scientific-notebook modifications.
+
+L1 now proceeds through (a) clean fixed-length weakly damped trajectories with multiple initial conditions, (b) observation noise with unchanged dynamics, (c) continuous length values across independent synthetic years with constant length within each trajectory/year, and optionally (d) white-noise forcing as a separate extension. Initial noise interpretation is observation noise. Models receive the same short image history; one/two-frame ablations diagnose observability. Compare NSV, InfoNCE, temporal BT and same-time BT, evaluating theta/velocity/length information and common-target prediction against persistence and delay-PCA/linear dynamics. Do not require beating an already accurate linear model in a near-linear regime.
+
+Clarified the proposed dimension reference: fixed-length deterministic pendulum has a two-variable physical state, but observation noise can inflate raw/estimated dimension. A three-dimensional augmented state (theta, velocity, L) is a valid reference for independently and continuously sampled L with dL/dt=0 per trajectory, provided the observation/history can identify it. A few discrete lengths do not automatically create a three-dimensional local manifold. A continuously changing physical length needs a specified driver and consistent mechanics; its autonomous state dimension is not inferred just from the word slow.
+
+Pilot proposal: dimensionless g=L0=1, gamma=0.02, 64x64 grayscale frames, default five-frame input, about 100 fixed-L trajectories spanning 8 reference periods and 50 observations per period. Observation noise levels 0/0.02/0.05 are provisional. L1c may use 60 continuous L groups in [0.8,1.2], five initial conditions per group, with groupwise splits. Include visible-length rendering and fixed-display-length observations to distinguish geometric readout from dynamical inference. Use truth diagnostics and predictive quality alongside ID, not a hard ID=2±0.3/3±0.3 gate.
+
+Reference checked: Chen et al., https://arxiv.org/html/2112.10755 (two physical state variables; single-frame ambiguity; consecutive-frame inputs). Full plan remains UNVERIFIED until Colab experiments run.
+
+
+## Session 70 — Implemented L1 pendulum notebooks 39–42 (2026-10-27)
+
+User requested L1 implementation in a new folder using the project's continuing notebook numbers, and asked whether L1a/b/c each use all methods. Clarified that L1a/b/c are data conditions, each compared with InfoNCE, predictive NSV and Barlow Twins; BT has temporal and same-time variants. NSV/BT are also self-supervised methods. NSV is run first on L1a for implementation checking, then the full matrix is evaluated; L1a is not restricted to NSV.
+
+Created `notebooks/toy_pendulum/` with:
+- `39_pendulum_data.ipynb`: deterministic weakly damped fixed/variable-length pendulum, observation model, immutable dataset manifests, trajectory/year-group splits, RK4 convergence and energy checks, oracle diagnostics.
+- `40_pendulum_nsv.ipynb`: matched five-frame CNN encoder and future-window decoder, train-only ID diagnostics, SIREN refinement at d=1/2/3/4/8.
+- `41_pendulum_ssl_barlow.ipynb`: InfoNCE, BT-temporal, BT-same-time, cold-start matched backbones, separate h/z exports and normalized InfoNCE z.
+- `42_pendulum_comparison.ipynb`: train-fitted delay-PCA/probes, validation-selected ridge alpha, held-out state readouts and direct forecasts, optional fixed-capacity nonlinear readout, group bootstrap intervals, plots and scorecards.
+- `l1_data.py`, `l1_learning.py`, `l1_evaluation.py`, deterministic `build_notebooks.py`, `test_l1.py`, and usage README. Each notebook embeds its required helpers, so Colab use does not depend on uploading .py files or an unpublished GitHub commit. Updated root README and the research plan's implementation status/numbering.
+
+Data: L1a and L1b share exact initial conditions, trajectories and splits. L1c samples continuous lengths independently across synthetic years, with constant length per trajectory and whole-year splits. Visible/hidden rendering controls are supported. Training uses no physical state/length labels. Condition observation noise is separated from a documented default 0.01 training-view augmentation. NSV predicts observed future frames rather than oracle clean images. No stochastic-force L1d or physically varying length within a trajectory is implemented.
+
+Outputs use only `BSISO_SSL_Project/toy/pendulum/` on Drive. Truth data are compressed; large uint8 image caches are rendered into Colab `/content`. Dataset/run hashes include source/config provenance; checksums and row identities protect reuse; partial runs are not silently overwritten. No automatic epoch-level resume. Defaults run L1a first; notebooks support L1b_s002, L1b_s005, L1c_visible, L1c_hidden and multi-seed/dimension scans.
+
+Evaluation scope is explicit: direct multi-horizon ridge readouts are not autonomous latent rollouts. Persistence is labelled oracle-state persistence because it sees true current theta/velocity. PCA/readout transforms fit training only; model/alpha selection uses validation only. CIs are grouped by trajectory or length group and condition on the fitted model; seed variation is retained separately, not pooled or selected on test.
+
+Validation: all eight automated tests passed in an existing scientific environment with CPU PyTorch, with no package installation. Tests include analytic small-angle accuracy, energy decay and integration refinement, group and noise consistency, manifest integrity, source-synchronized valid notebooks, train/test-label isolation for linear/nonlinear probes, loss correspondence and gradients, tiny one-epoch execution of all four objectives, NSV refinement, save/reuse, complete comparison, and a noisy hidden-length branch. Plot layouts were visually inspected. A broken existing base torch install was bypassed using another already-installed working environment; no environment was repaired or modified. Full Colab/Drive mounting and GPU experiments have not been run; tiny fixture numbers are not scientific results.
+
+Existing notebook 35/37 edits were left untouched. No commit or push was requested/performed. Next user workflow: run 39 on Colab CPU, copy DATASET_ID into 40/41 (T4 GPU), then 42 (CPU); start with L1a before expanding conditions and seeds.
+
+
+## Session 71 — Publish all current changes to GitHub (2026-10-27)
+
+User explicitly requested "push everything to github". Publication scope includes the L1 pendulum implementation (notebooks 39–42 and helpers/tests), the oscillator validation plan, root README and accumulated conversation log, plus the existing notebook 35/37 changes adding SST1-based RMM reproduction R1 to the comparison ladder. Target: `origin/main` at `https://github.com/Jiayi459/data-driven-climate-science`. The remote main branch was verified to match the local starting commit `87db15b48bd65fefcad0a9a99adb4d7119ffe021`.
+
+Pre-publication validation: `git diff --check` passed; the L1 implementation's eight automated tests and notebook/source synchronization checks had already passed in Session 70. Full Colab/GPU experiments remain pending. This request authorizes committing and pushing all current non-ignored project changes; ignored caches and local data are outside the tracked snapshot.
