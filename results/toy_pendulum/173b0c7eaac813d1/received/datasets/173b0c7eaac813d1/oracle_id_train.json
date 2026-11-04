@@ -1,0 +1,54 @@
+{
+  "fixed": {
+    "n_sampled": 2000,
+    "scales": [
+      {
+        "k": 10,
+        "n_valid": 2000,
+        "median_id": 1.7435921983548877,
+        "mean_id": 2.035458840042049
+      },
+      {
+        "k": 20,
+        "n_valid": 2000,
+        "median_id": 1.8913484663198443,
+        "mean_id": 2.040480001127819
+      },
+      {
+        "k": 40,
+        "n_valid": 2000,
+        "median_id": 1.999555794539007,
+        "mean_id": 2.055020698591572
+      }
+    ],
+    "participation_ratio": 1.9937370623470099,
+    "neighbor_exclusion": "same group",
+    "used_split": "train"
+  },
+  "variable": {
+    "n_sampled": 2000,
+    "scales": [
+      {
+        "k": 10,
+        "n_valid": 2000,
+        "median_id": 2.692694719765239,
+        "mean_id": 2.941472291757694
+      },
+      {
+        "k": 20,
+        "n_valid": 2000,
+        "median_id": 2.7212614651754263,
+        "mean_id": 2.835686756517055
+      },
+      {
+        "k": 40,
+        "n_valid": 2000,
+        "median_id": 2.6796421416556138,
+        "mean_id": 2.771358779331631
+      }
+    ],
+    "participation_ratio": 2.1854324460984853,
+    "neighbor_exclusion": "same group",
+    "used_split": "train"
+  }
+}

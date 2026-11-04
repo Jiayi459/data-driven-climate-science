@@ -5,6 +5,13 @@ All four notebooks are self-contained: upload/open the `.ipynb` in Colab and run
 cells. They embed their Python helpers, so an unpublished GitHub commit or separate
 module upload is not required. No packages are installed into the local conda environment.
 
+**Protocol update (2026-11-04): one frame is one sample.** Defaults in 40/41/42
+now use `window=1`; temporal pairing/prediction still uses `lag=5`. This matches
+the project's per-time-step climate input convention without concatenating days.
+The October L1a results used `window=5` and remain a separate historical protocol.
+Existing simulator data can be reused, but single-frame models must be trained
+again; old checkpoints/features are not converted by changing the evaluation setting.
+
 ## Experimental matrix
 
 L1a/b/c are **data conditions**, not different learning methods. Every condition can
@@ -35,12 +42,13 @@ run all objectives; use the same protocol for L1b and L1c.
 2. In 40 and 41, set that ID and `CONDITIONS_TO_RUN=['L1a']`. Blank ID resolves only
    when exactly one dataset exists; it never silently chooses the latest dataset.
 3. Keep `BASE.window`, `BASE.lag`, `BASE.eval_stride`, `SEEDS`, and other shared
-   hyperparameters matched. Default is five-frame input and five-frame lag (no overlap),
+   hyperparameters matched. Default is one-frame input and five-frame temporal lag,
    30 stage-1 epochs, 60 NSV refinement epochs, and seed 42.
 4. Run 42 with the same ID/history/stride. It lists missing methods and saves all
    compatible completed runs separately. Use `SELECTED_RUN_IDS` for a prespecified subset.
-5. Repeat for `L1b_s002` / `L1b_s005`; then `L1c_visible` / `L1c_hidden`. Add 3 to
-   `PROJECTION_DIMS` for the L1c three-coordinate comparison. Expand seeds only after the pilot works.
+5. Repeat for `L1b_s002` / `L1b_s005`; then `L1c_visible` / `L1c_hidden`. Treat
+   projector dimensions as a sweep, not a prescribed physical-variable count.
+   Expand seeds only after the pilot works.
 
 ## Data and views
 
@@ -58,6 +66,12 @@ run all objectives; use the same protocol for L1b and L1c.
 - 64×64 grayscale images; no per-frame standardization, cropping, amplitude scaling,
   clipping of noisy arrays, or time shuffling. Quantized clean images form a reusable
   local cache; observed noise is added as float32.
+- The default encoder sees `[batch,1,64,64]`, with no history concatenation or
+  numerical velocity channel. Temporal InfoNCE/BT pairs are `(I_t,I_{t+5})`,
+  NSV predicts `I_{t+5}` from `I_t`, and BT-same uses two views of `I_t`.
+  Five frames are 0.1 reference period, not five calendar days. With window=1,
+  the existing InfoNCE nearby-negative rule excludes same-trajectory anchor
+  separations < window+lag = 6 frames; the previous window=5 rule used <10.
 - Observation noise is keyed by trajectory/frame/view. Overlapping windows have
   consistent pixels within a view; all methods see the same seeded observations.
 - A separate **training augmentation** `view_noise_std=0.01` is applied to input
@@ -93,6 +107,16 @@ run all objectives; use the same protocol for L1b and L1c.
 - Fixed L has a two-variable physical state. A continuously sampled, constant-per-run
   L supports a three-variable augmented-state reference if observable. Noisy image-cloud
   ID need not equal 2/3, and a few discrete lengths do not establish a 3-D local manifold.
+- **Single-frame observability:** the renderer uses theta and visible length only.
+  At fixed L, the same theta produces the same clean image for different velocities;
+  a deterministic encoder cannot uniquely recover velocity or the full physical
+  state from it. Clean snapshot geometry is locally one-dimensional (theta), or
+  two-dimensional (theta,L) when continuous L is visibly rendered. Hidden L is
+  absent from a single snapshot. Velocity/future readouts remain useful diagnostics
+  of this missing information, not mandatory ID=2/3/full-state recovery gates.
+  Independent image noise, quantization and finite sampling affect ID estimates.
+  A single-day multivariable climate field need not have the same observability
+  limit as this position-only pendulum image.
 
 ## Output layout and reruns
 
@@ -112,6 +136,9 @@ MyDrive/BSISO_SSL_Project/toy/pendulum/
 Full image arrays live only in `/content/ddcs_l1_frames`, not Drive. One default
 fixed-L cache is about 164 MB; one variable-L rendering cache about 493 MB (uint8).
 Local Colab caches may be deleted/regenerated without deleting saved states/results.
+
+Notebook 42 Cell 6 downloads a ZIP containing the evaluated runs' JSON/CSV reports
+and PNG figures for sharing results. It excludes raw arrays and model checkpoints.
 
 Dataset identity includes simulation settings and data-code hash. Runs additionally
 include condition, seed, learning settings and training-code hash. Completed artifacts
@@ -145,4 +172,7 @@ reference, integration/energy checks, group/noise/cache integrity, held-out-labe
 isolation for linear and nonlinear probes, notebook/schema/source validation,
 loss/gradient checks, and tiny one-epoch runs of all four objectives through evaluation.
 The noisy hidden-length branch and generated plot layouts were also checked. These
-are correctness checks; full Colab GPU runs and scientific conclusions remain pending.
+are correctness checks. The October five-frame L1a pilot is analyzed in
+`results/toy_pendulum/173b0c7eaac813d1/analysis.md`; single-frame Colab runs and
+L1b/L1c learning results remain pending. The pipeline test now covers window=1,
+while encoder shape/gradient checks retain an explicit history configuration.

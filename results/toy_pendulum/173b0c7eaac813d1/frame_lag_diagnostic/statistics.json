@@ -1,0 +1,120 @@
+{
+  "dataset_id": "173b0c7eaac813d1",
+  "simulation": {
+    "seed": 20261027,
+    "n_fixed": 100,
+    "n_length_groups": 60,
+    "trajectories_per_length": 5,
+    "periods": 8.0,
+    "frames_per_period": 50,
+    "substeps": 8,
+    "g": 1.0,
+    "reference_length": 1.0,
+    "damping": 0.02,
+    "length_min": 0.8,
+    "length_max": 1.2,
+    "image_size": 64
+  },
+  "source_sha_verified": true,
+  "reconstructed_fixed_npz_sha256": "f0197e5241e490311491a90b22185cb2d2b4b9d11dbc15ac4a4fbd3afcf32f30",
+  "original_fixed_npz_sha256": "97c9ac9880ebb33bc7e4ec2d6d88e1403bf1132dcca1a8ca2205acacbdc191ce",
+  "reconstructed_npz_bytes_match": false,
+  "scope": "train trajectories; same anchors for lag1/5; clean quantized images; no model training",
+  "n_trajectories": 60,
+  "anchors_per_trajectory": 198,
+  "n_pairs_per_lag": 11880,
+  "anchor_start_stop_stride": [
+    0,
+    394,
+    2
+  ],
+  "pairwise_augmentation_noise_rms_reference": 0.014142135623730952,
+  "lag_statistics": {
+    "1": {
+      "angle_change_degrees": {
+        "mean": 2.2016431189544754,
+        "median": 1.9352946102349824,
+        "p05": 0.2139626732003999,
+        "p95": 5.03561437227777,
+        "max": 7.519212976389795
+      },
+      "velocity_change": {
+        "mean": 0.03795402004543074,
+        "median": 0.034209282624044664,
+        "p05": 0.003664245326350897,
+        "p95": 0.08335273685672424,
+        "max": 0.11323258266286546
+      },
+      "bob_displacement_pixels": {
+        "mean": 1.0165865062225403,
+        "median": 0.8937038915238443,
+        "p05": 0.09881092623860366,
+        "p95": 2.324769433509394,
+        "max": 3.4699873765575684
+      },
+      "image_rmse": {
+        "mean": 0.025892283767461777,
+        "median": 0.024400299414992332,
+        "p05": 0.002847748913336545,
+        "p95": 0.053378444910049436,
+        "max": 0.0664905533194542
+      },
+      "time_separation": 0.12566370614359174,
+      "reference_period_fraction": 0.02,
+      "small_angle_reference_phase_degrees": 7.2
+    },
+    "5": {
+      "angle_change_degrees": {
+        "mean": 10.842451335817714,
+        "median": 9.523560247312549,
+        "p05": 1.0492268096002944,
+        "p95": 24.80391509020444,
+        "max": 37.01021263138929
+      },
+      "velocity_change": {
+        "mean": 0.18593828666816678,
+        "median": 0.16730889296829615,
+        "p05": 0.01786824883386138,
+        "p95": 0.40945609370395664,
+        "max": 0.5621955624486086
+      },
+      "bob_displacement_pixels": {
+        "mean": 4.987711014834094,
+        "median": 4.393053334635525,
+        "p05": 0.484540985394919,
+        "p95": 11.365559373298218,
+        "max": 16.79623496456747
+      },
+      "image_rmse": {
+        "mean": 0.06274187564849854,
+        "median": 0.07323430478572845,
+        "p05": 0.013646247144788504,
+        "p95": 0.08083740957081317,
+        "max": 0.08131113648414612
+      },
+      "time_separation": 0.6283185307179586,
+      "reference_period_fraction": 0.1,
+      "small_angle_reference_phase_degrees": 36.0
+    }
+  },
+  "examples": [
+    {
+      "displacement_quantile": 0.05,
+      "trajectory": 10,
+      "anchor_frame": 102,
+      "bob_displacement_pixels": 0.4845607451541331
+    },
+    {
+      "displacement_quantile": 0.5,
+      "trajectory": 6,
+      "anchor_frame": 306,
+      "bob_displacement_pixels": 4.392553221525653
+    },
+    {
+      "displacement_quantile": 0.95,
+      "trajectory": 23,
+      "anchor_frame": 146,
+      "bob_displacement_pixels": 11.365500090261254
+    }
+  ]
+}

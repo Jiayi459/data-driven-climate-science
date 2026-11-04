@@ -6198,3 +6198,218 @@ Existing notebook 35/37 edits were left untouched. No commit or push was request
 User explicitly requested "push everything to github". Publication scope includes the L1 pendulum implementation (notebooks 39–42 and helpers/tests), the oscillator validation plan, root README and accumulated conversation log, plus the existing notebook 35/37 changes adding SST1-based RMM reproduction R1 to the comparison ladder. Target: `origin/main` at `https://github.com/Jiayi459/data-driven-climate-science`. The remote main branch was verified to match the local starting commit `87db15b48bd65fefcad0a9a99adb4d7119ffe021`.
 
 Pre-publication validation: `git diff --check` passed; the L1 implementation's eight automated tests and notebook/source synchronization checks had already passed in Session 70. Full Colab/GPU experiments remain pending. This request authorizes committing and pushing all current non-ignored project changes; ignored caches and local data are outside the tracked snapshot.
+
+
+### Session 71 follow-up — L1 source-file roles (2026-10-27)
+
+Publication completed in commit `cf2b52f5355354d4357ccdbe56ac59e0cead78b9`; GitHub main was verified to match and the working tree was clean at the end of the push.
+
+User asked what build_notebooks, l1_data, l1_evaluation, l1_training and test_l1 are. Explained that the actual training module is `l1_learning.py`: data simulation/rendering/splits live in l1_data, representation training in l1_learning, held-out probes/forecasts/comparison in l1_evaluation. build_notebooks embeds these sources into self-contained Colab notebooks 39–42; test_l1 provides small implementation checks, not formal experiment results. Normal usage is notebook 39, then 40/41, then 42; no separate helper upload or manual .py execution is needed. For code maintenance, edit the Python sources and rebuild the notebooks to avoid losing notebook-only edits. No experiment or implementation change was requested in this follow-up.
+
+
+## Session 72 — Collect completed L1 notebook results for analysis (2026-10-28)
+
+User reports finishing all L1 notebooks and asks what to provide for analysis. Inspected the actual artifact writers in notebooks 39–42 and the helper modules. Recommended an initial ZIP of JSON/CSV/PNG reports for the dataset and the exact analyses/runs referenced by notebook 42 RESULTS: dataset manifest and oracle diagnostics; evaluation scorecard, configuration, ID and probe selection; run configuration, training/refinement histories and ID; preview and evaluation figures. Provided a Colab cell to collect these without model checkpoints or large arrays. Feature arrays plus matching evaluation_truth arrays can be requested later for sample-level diagnostics or recomputing uncertainty.
+
+Important scope: running all four notebooks does not imply running all L1a/b/c conditions, since defaults select L1a. Metadata will establish conditions, profile settings, dimensions and seeds. No result artifacts have yet been received or analyzed; the user's report is not treated as verified numerical/scientific success.
+
+
+## Session 72 — Analysis of L1 notebooks 39–42: what each does, what it addresses, what is verified (2026-10-28)
+
+The user asked, for each of notebooks 39–42: what it does, what problem it solves, and what results it verifies. Explanation only; no code was changed.
+
+**Status checked this session**
+- `build_notebooks.py --check`: all four notebooks match their `.py` sources.
+- `test_l1.py`: 8/8 tests pass. They were run in the existing `trajectron++` env (torch 1.13.1, CPU), with no installs.
+- The notebooks carry no saved outputs.
+- A Google Drive search for `oracle_dynamics.png`, `id_train.json` or `scorecard.csv` (modified after 2026-10-26) found nothing.
+- **So there are no scientific results yet, only implementation and unit-test checks.**
+
+**Roles**
+- **39 (CPU): data and reference values.**
+  - RK4 pendulum: θ̇ = v, v̇ = −γv − (g/L) sin θ, with g = L0 = 1 and γ = 0.02; 8 periods × 50 frames, 8 RK4 substeps per frame.
+  - Fixed-L set: 100 trajectories. Variable-L set: 60 groups with L ~ U[0.8, 1.2], 5 trajectories each.
+  - Splits are 60/20/20 over whole trajectories or whole L-groups. Frames are 64×64, with the length either visible or hidden in the image.
+  - Checks: step-halving error, energy never rising, no group crossing a split.
+  - Oracle kNN-MLE ID on the true states, giving a reference for the estimator itself.
+- **40 (T4): NSV.**
+  - A 5-frame window goes through a CNN to a 64-D h, and a decoder predicts the next non-overlapping 5-frame window (lag = 0.1 T0).
+  - Then a train-only ID estimate, then SIREN refiners at d = 1, 2, 3, 4 and 8.
+- **41 (T4): InfoNCE, BT-temporal and BT-same.**
+  - All three share the same cold-start backbone, initialisation and data.
+  - InfoNCE masks windows from the same trajectory with |Δt| < 10 frames out of the negatives. Recurrence one period later is not masked.
+  - Each run saves h, z and InfoNCE's z_unit.
+- **42 (CPU): held-out evaluation.**
+  - Representations: every completed run's features, a delay-PCA baseline and oracle-state persistence.
+  - Ridge probes (train-fitted, α chosen on validation) for θ, v and L now, and for θ and v at about T0/4, T0 and 2T0. A small MLP probe for the current state.
+  - ID per representation, bootstrap CIs over test trajectories or L-groups, and plots.
+
+**Mapping to project problems**
+- L1a checks NSV against a known answer (Chen et al., 2 state variables). There is no ground truth for the real BSISO d̂ = 4 or MJO d̂ = 7.
+- L1b mirrors the Session 30 noise confound.
+- L1c visible vs hidden: "ENSO visible in a snapshot" vs "visible only in the dynamics" (hidden L is identifiable only through θ̈).
+- Notebook 41 removes the confounds of the real-data objective → representation comparison (Sessions 45–58): different encoders, Barlow warm-started from NSV, different inputs.
+- BT-same vs BT-temporal tests the Session 45 claim that Barlow is phase-blind.
+- Notebook 42 replaces t-SNE/random-split evaluation with group-held-out, train-fitted metrics that carry CIs.
+
+**Gaps noted**
+1. Notebook 42 has no direct energy/amplitude or phase-angle targets. Energy decays with an e-folding time of 1/γ = 50 (about 8 periods), while a 5-frame lag rotates the phase by 36°. Energy is therefore the natural slow quantity that BT-temporal should keep, and it is not probed.
+2. Oracle persistence is strong at T0 and 2T0 because the motion is nearly periodic. T0/4 is the informative horizon.
+3. Only lag = 0.1 T0 is run. The project's NSV used lag 10 d, about 0.2–0.3 of a BSISO period, and the plan's sweep (0.025 / 0.10 / 0.25) is not run.
+4. The window = 1 ablation is not run, yet it is the direct analogue of the project's single-day-field NSV.
+5. L1 has no ENSO-like slow driver and no displacement test or year null, so it cannot answer the Session 68 question; that needs L2.
+6. Only seed 42 by default.
+
+**Next:** run 39 → 40 → 41 → 42 on L1a on Colab, then L1b and L1c.
+
+
+### Session 72 results — First L1a pilot received and analyzed (2026-10-28)
+
+User provided `/Users/haojiayi/Downloads/pendulum_results_173b0c7eaac813d1.zip` and requested result analysis. Used academic-research-suite / experiment-agent validate mode inline. Extracted 34 JSON/CSV/PNG reports as data into `results/toy_pendulum/173b0c7eaac813d1/received/`, verified the scorecard checksum, cross-run metadata links and matching hashes for all three local helper modules. ZIP SHA256: `91eb1442a500aab118066499a3ead896a00382e4e3c9c04ac7d87c357d21c773`. Only L1a is present: fixed length, observation noise zero, training-view noise 0.01, one seed=42 for four objectives, 100 trajectories (source/config imply 60/20/20), 1500 evaluation windows from 20 test trajectories. Variable-length oracle checks do not constitute L1c representation experiments.
+
+Saved `analysis.md`, five derived summary CSVs, `provenance.json`, a report-only `summarize_received.py`, and a visually checked diagnostic PNG/PDF. Verification status ANALYZED: no training, raw-array/probe rerun or experiment-code changes. Existing source remains unchanged.
+
+Main findings: NSV h (64D) ridge R2 theta=0.999604 / velocity=0.992266; delay-PCA64=0.998877 / 0.982117. BT-same h=0.982352 / 0.783701; BT-temporal h=0.973982 / 0.708702; InfoNCE h=0.971534 / 0.574054. Nonlinear probes improve BT h considerably; 5 of 14 MLP fits hit convergence warnings, so failed nonlinear readout does not prove absence of all recoverable information. NSV h ID medians (nb42 k=10/20/40)=1.833/1.898/1.961, close to the two-state reference. NSV z_d2 also has ID near 2 but current-state R2 approximately zero, demonstrating ID alone is insufficient. All trained 2D outputs are weak, particularly temporal BT and normalized InfoNCE. Original nb42 figures select low-dimensional outputs and omit h, while PCA predictions use all 64 components.
+
+NSV refinement: best validation normalized-latent MSE d1/2/3 about 0.918, d4=0.623, d8=0.009506 at epoch36; d8 deteriorates sharply around epochs44–46 to final0.921. Best checkpoint restoration and cloned state copying are present in source; final features are not deliberately exported from the last degraded epoch. This suggests optimization/calibration problems, not a physical dimension of 8. The adapted local refiner differs from Chen's official layer arrangement, sine bottleneck, decoder initialization and output initialization; local lr1e-3 has no scheduler/clipping. Official model_utils/models and SIREN example were checked as primary sources, without claiming any one difference is a proven cause.
+
+InfoNCE normalizes a 2-coordinate projector onto a circle (one continuous degree of freedom); z_unit ID0.92–0.99 is consistent with that constraint but does not establish phase recovery. BT temporal may favor slow quantities, but energy/amplitude encoding, folding or optimization failures need feature-level diagnostics. Nonconstant plotted z/ID do not justify calling it constant collapse. Current 2D tests do not invalidate Barlow generally. NSV h beats PCA on all six forecast RMSE point estimates, with 2T0 reductions about55.2% theta and40.1% velocity; these are direct ridge readouts, not autonomous rollouts or cross-seed significance claims.
+
+Source audit: validation batches contain 1–2 trajectories each and drop80 tail windows; training batches shuffle globally. InfoNCE/BT losses depend on batch composition, so train–val gaps are not pure overfitting evidence. Uncertainty is conditional on one trained model with only20 independent test groups. All146 rows retained, no p values or best-test-seed selection; all11 statistical-fallacy applicability checks recorded.
+
+Recommended next: debug L1a refinement with fixed encoder and validation-only selection; compare projector dimensions and add matched-dimension PCA controls; inspect slow-variable/continuity hypotheses; then freeze protocol and expand training seeds, fresh test trajectories and L1b/c. Additional four features.npz plus matching evaluation_truth.npz enable current-state diagnostics; future paired-error recomputation additionally needs fixed.npz or saved future predictions/truth. No extra files are needed to read the present report.
+
+
+### Session 72 follow-up — Reading latent_test and temporal InfoNCE pairs (2026-10-28)
+
+User asked whether latent_test is pendulum latent space, why patterns differ and how SSL InfoNCE pairs are constructed. Checked current plotting/sampling/loss code against archived run configuration. Explained: each plotted point is one five-frame test history, colored by theta or velocity at its final frame; the same coordinates are repeated across rows, with different colors. Test scatter subsamples 1500 rows by3 (500 plotted points across20 trajectories). The first four columns show 2D projector/refiner outputs after train-fitted PCA centering/rotation; the fifth projects64D delay-PCA to2D for display. Axes are not physical theta/velocity, and no time ordering is drawn. Different objectives, arbitrary coordinates, compression and training quality produce different geometries; shapes alone do not validate state recovery. InfoNCE column is raw z, not z_unit; a circular-looking scatter does not prove phase recovery.
+
+Exact InfoNCE pairing: A_i=[I_(t_i-4),...,I_t_i], B_i=[I_(t_i+1),...,I_(t_i+5)] from the same trajectory, window=lag=5, independently augmented with Gaussian std0.01. L1a observation noise is0. Positive is the matching batch row; off-diagonal cross-view entries are negatives except pairs from the same trajectory with anchor-end distance<10frames, which are masked. Other trajectories and distant recurrent states can still be negatives. Batch128, training stride2, cosine-normalized z with temperature0.1; loss averages both directions. There are no phase/state labels in pair construction. The shift is0.1 reference period (about36 degrees in the small-angle limit), so these positives are distinct physical states; temporal similarity can compete with retaining fast phase. This is a hypothesis to test, not a proven reason for every pattern.
+
+
+### Session 72 follow-up — Encoder input format (2026-10-28)
+
+User asked whether the simulated pendulum encoder input is one image per frame. Clarified the pipeline: integrate theta/velocity at each sampled time, render each angle into a64x64 grayscale pendulum image, then stack five consecutive frames as channels. A sample is[5,64,64], a default batch is[128,5,64,64], and the first Conv2d has5 input channels. The encoder does not receive theta, velocity, length or frame IDs as numerical channels; velocity must be inferred from temporal image changes. Shared encoder output h has64 coordinates; InfoNCE/BT projector defaults to2D, while NSV predicts the next five-frame window and separately refines h. Raw observation noise for L1a is0, while training-view augmentation std0.01 still applies.
+
+
+### Session 72 follow-up — Per-method architectures, sample counts and hyperparameters (2026-10-28)
+
+User requested the actual architecture, hidden-state size, data volume and hyperparameters for each representation. Saved `results/toy_pendulum/173b0c7eaac813d1/architecture_and_hyperparameters.md`, based on archived run/evaluation metadata and checksum-matched source. Clarified that64x64 is image size, intermediate CNN map is64x8x8, h is a64-coordinate vector and default projector z has2 coordinates. InfoNCE/BT share the same architecture but are independently trained; branches within each Siamese model share weights.
+
+Verified counts by source index construction and parameter-only model instantiation (no training): encoder287584 parameters; NSV encoder+image decoder577637; InfoNCE/BT encoder+projector296418 each. Refiner architecture64->128->64->d->64->128->64, d1/2/3/4/8.100 fixed-length trajectories x401frames=40100images; split60/20/20. First-stage candidate train/val windows11760/3920; drop_last yields11648/3840 per epoch. Unified stride4 index gives4500/1500/1500 train/val/test features for refinement/probes; PCA fits3000 sampled train windows.
+
+Documented common AdamW lr1e-3, weight_decay1e-5, batch128,30epochs, seed42, clip norm5; temporal lag5, window5, train stride2, eval stride4, augmentation std0.01. InfoNCE temperature0.1 with same-trajectory negative exclusion<10frames. BT lambda0.005/epsilon1e-5; BT-same actual pair lag0 despite common config lag5. NSV refiner instead uses Adam with no weight decay, lr1e-3,60epochs per dimension, seed42+d, no clipping/scheduler. Included exact CNN/decoder/SIREN shapes, checkpoint epochs, separate posthoc probe and ID settings, and PCA1280->64 after spatial block averaging. No experiment implementation or notebooks were changed.
+
+
+### Session 72 follow-up — h, projector and plotting PCA (2026-10-28)
+
+User annotated the InfoNCE architecture and asked whether everything after h64 is PCA to2D. Clarified that h64 is a learned encoder representation, not automatically a minimal physical state. The subsequent Linear64->128, LayerNorm, SiLU and Linear128->2 form a trainable nonlinear MLP projector; InfoNCE/BT loss on z backpropagates through both projector and encoder. This is not PCA. The displayed InfoNCE/BT columns subsequently fit PCA on training z2 for centering/rotation in2D, without further dimensional reduction. Visualizing h64 through PCA2 would be a separate visualization and is not what those columns currently show.
+
+
+### Session 72 follow-up — English pipeline and z2 dimensionality (2026-10-28)
+
+User requested the representation pipeline in English and confirmation that z2 is2D. Provided: input image sequence -> CNN encoder ->64-dimensional encoder representation h -> trainable MLP projection head ->2-dimensional projected representation z -> PCA fitted on training representations for visualization ->PC1/PC2. Confirmed each z contains two coordinates;2D-to-2D visualization PCA centers and rotates/reflects coordinates without further dimensional reduction.
+
+
+### Session 72 follow-up — Why a projector rather than PCA2 (2026-10-28)
+
+User asked why use an MLP after h64 instead of PCA to2D. Clarified that a trainable nonlinear projector defines the space where SSL loss is applied and backpropagates into the encoder; ordinary post-training PCA instead finds maximum-variance linear directions for visualization. For inspecting the encoder, h64->train-fitted PCA2 is appropriate and does not require retraining when h is saved. A projection head is optional (direct loss on h is an ablation), and its output need not be2D. The initial z2 choice was an explicit low-dimensional bottleneck test, not required for plotting; it should be distinguished from the main h representation evaluation. SimCLR's original paper supports a nonlinear head's empirical benefit in its setting, not a universal guarantee or a proof for this pendulum. Barlow's original study benefits from high-dimensional outputs. Recommended separating the training branch h->projector z_D->loss from the visualization branch h->PCA2; neither a two-dimensional physical state nor visually clean PCA guarantees complete state recovery. No implementation change requested/performed.
+
+Primary references checked: https://proceedings.mlr.press/v119/chen20j.html ; https://proceedings.mlr.press/v139/zbontar21a.html .
+
+
+### Session 72 follow-up — Does the experiment establish NSV=2? (2026-10-28)
+
+User asked the present training conclusion and whether NSV is2. Clarified three distinct statements: fixed-L simulator has known physical state(theta,velocity), hence dimension2; predictive NSV encoder h is64D but its train-only median ID is1.833/1.898/1.961 for k10/20/40, consistent with a2D manifold; the manually configured2D refiner has not recovered useful state coordinates (ridge R2 theta/velocity both about0.00004, with similarly weak tested nonlinear readout). Therefore dimension estimation is encouraging, but successful extraction of two NSVs is not established. NSV h current-state R2=0.9996/0.9923 and direct forecast results are strong for this pilot. Better d8 refinement does not imply physical dimension8. Scope remains L1a, seed42,20 test trajectories; prioritize refinement optimization and further validation before noise/length robustness claims.
+
+
+### Session 72 follow-up — InfoNCE/Barlow findings and state_readout_test (2026-10-28)
+
+User asked the results for InfoNCE/Barlow and interpretation of state_readout_test.png. Explained that it shows current theta/velocity read from representations by a posthoc ridge probe along held-out trajectory18, not latent coordinates or autonomous/future simulation. Black is simulator truth, time axis is input-window final frame; each prediction uses the five-frame history ending there. Physical labels train the evaluation probe on train groups only, with regularization chosen on validation. Colored model curves in this figure use2D z (NSV z_d2); PCA readout uses64 features. Near-zero model curves indicate poor current linear state readout from those selected features, not proof that encoder h contains no information.
+
+Confirmed full held-out metrics: BT-same h ridge R2(theta,v)=0.982352/0.783701, MLP=0.996308/0.969722; BT-temporal h ridge=0.973982/0.708702, MLP=0.991082/0.926681; InfoNCE h ridge=0.971534/0.574054, MLP=0.963661/0.406643. All three h MLP fits hit200-iteration convergence warning.2D z ridge R2: BT-same0.382112/0.061281; BT-temporal about0/0; InfoNCE0.005048/about0. Nonlinear z tests improve BT-same and some InfoNCE angle information but do not recover both states well. Thus h representations have usable information while current2D heads are weak; the figure alone is not a fair full-method ranking, nor evidence of generic SSL failure. Findings remain one L1a seed,20 independent test trajectories.
+
+
+## Session 73 — Retrospective: what was validated after ENSO displacement, and what the representations preserve (2026-11-03)
+
+**Request:** read the conversation log, reconstruct the chronology and reasoning behind the representation-validation work, and explain temporal Barlow Twins, contrastive/lag-prediction objectives, frozen-latent probes and field reconstruction with specific notebook references.
+
+**Material Passport:** academic-research-suite / experiment-agent, interpretive validate mode; Verification Status: ANALYZED (historical records and current source inspected, no experiments rerun); overall confidence CAUTION for mechanistic/general claims. The repository log is more complete than the Desktop copy; both were consulted. Existing notebooks, code and earlier log entries were left unchanged. This entry records qualifications to historical interpretations rather than silently rewriting the history.
+
+**Chronology and scientific logic**
+
+1. March-April, nb03-06: after initial phase-conditioned EN/LN centroid displacement, tested background removal, Lee preprocessing, MJJAS expansion, year-based training split, per-phase counts/nulls and physical EN-LN composites. nb06 compares latent separation with differences in wind/OLR fields. Its negative Spearman correlation (rho=-0.452, p=0.260) is exploratory and does not establish that CNNs capture coherence beyond composites. The old label “Bonferroni significant” for p=0.0105 across eight phases is incorrect at alpha=0.05 (threshold 0.00625).
+2. Late April-May, nb07-10b: compared conventional index, supervised 2D and label-free temporal SSL; inspected angle/radius, lag circular correlation, rainfall readouts and phase composites. Post-orientation-fix index/supervised and index/SSL correlations were 0.844 and 0.305. Rainfall forecast ACC was near zero. These are geometry/downstream diagnostics, not complete information-content tests. nb11-16 extended the comparison to MJO and exposed seasonal confounding and the limits of directly interpreting latent atan2 as phase.
+3. Late May-June, nb17-23: predictive NSV route. MJO nb21 trains X_t -> encoder h64 -> decoder -> X_(t+10); nb22 estimates intrinsic dimension; nb23 refines to seven coordinates and evaluates dynamics. BSISO's corresponding route selected four. These are representation-dependent estimated dimensions, not proven complete physical state-variable counts. Daily-mean migration and own-RMM construction/alignment (nb24) provided a better physical reference clock.
+4. June 12-24, nb26/27: temporal Barlow pairs t and t+tau, tau=1..5, with an NSV-warm-started 64D encoder and D3/D7 projector. Both invariance and redundancy terms are multiplied by the lag schedule. Steeper lag weights change the relative emphasis of lags, but still target diagonal cross-correlation near one. Projector phase probes remained around 12%; encoder phase probes retained more information. Trajectory/scatter views and displacement-matrix SVD were supporting diagnostics; PR about two describes the EN-LN displacement subspace, not total physical state dimension.
+5. June 26-29, nb28-30: downloaded/preprocessed moisture, checked moisture/convection lead-lag against own-RMM, then repeated with learned latent angles. nb30 Cell 9 found own-RMM harmonic amplitudes about 5-6, SSL partial coherence, BT very small coherence. An offset angle derived from a nearly zero complex harmonic is unstable and is not meaningful physics. These diagnostics test selected theoretical signatures, not whole-theory validation.
+6. June 28-29, nb31/32: changed training using q/OLR auxiliary prediction, then 2D rebalancing and a 3D circle-plus-extra-coordinate design. Better amplitude/field content did not produce the intended clean phase angle or ENSO axis. Content decodability, coordinate geometry and disentanglement are different properties. EOF orthogonality alone also does not mathematically guarantee temporal quadrature.
+7. June 29-30, nb33: froze saved latents, fit new readouts and tested on held-out years. Cell 2 uses logistic/Ridge and finite MLP probes; Cell 3 reconstructs current meridionally averaged u850/OLR longitude profiles using Ridge; Cell 4 has descriptive direction regression and PC1 spectrum; Cells 5/5b compare objectives, with NSV recombined/date-aligned; Cell 6 tests event proxies. The sin/cos direction fits use pooled data and are descriptive, not held-out probe scores. Actual phase labels in the primary probes come from the aligned labels CSV, while nb34 separately uses continuous own-RMM and BoM targets.
+8. July 8, nb34: directly decodes RMM amplitude and phase separately from frozen Barlow D3/D7, using Ridge and MLP, own-RMM-self positive control and official BoM robustness check. The finite tested MLP does not reliably recover phase; this does not prove that every possible nonlinear readout must fail.
+9. July 9, nb33 Cells R1-R3 (git commits 649d702, abf6b8c): added latent -> reconstructed [u850,u200,OLR] profile -> fixed train-fitted linear own-RMM readout. This is different from nb34's direct latent-to-amplitude/phase probes. Code exists, but no returned scientific metrics for this extension were found in the log and the notebook has no saved outputs; do not report it as a demonstrated result.
+10. September-October, nb35-38: revisited the reliability and interpretation of displacement using common dates, normalization and year/block-preserving nulls, then index reproduction/preprocessing controls. The old day-level z ordering is superseded. Background association and dynamical modulation remain distinct explanations. The October audit also found a 120-row running-mean issue in concatenated MJJAS data; continuous all-month MJO inputs do not share that particular issue.
+11. October 27-28, nb39-42: moved to known-truth pendulum data, independent-trajectory evaluation and separate encoder/projector checks, with same-time versus temporal BT views. The later L1a results supersede the earlier same-day “no scientific results yet” entry and stale plan status. L1b/L1c learning results and L2/L3 mechanism validation remain pending.
+
+**Verified definitions and historical numbers**
+
+- Frozen means the encoder and existing representation are fixed; the new probe/decoder is trained. Evaluation labels therefore do not make the original SSL training supervised. The early phase/ENSO-conditioned pairing models are distinct from label-free temporal nb15.
+- nb15 positives are t versus another day within +/-3 days in the same year/split; other cross-view batch rows serve as negatives. It uses raw dot-product InfoNCE. Negatives encourage distinctions between pairs, but do not guarantee a complete propagating state.
+- nb26 uses cross-correlation C_ij across a batch of temporal pairs: diagonal-to-one favors agreement of corresponding features, off-diagonal-to-zero discourages redundancy. This is a project-specific temporal-view adaptation. Original BT uses distorted views of the same sample and does not imply universal loss of physical phase.
+- nb33 field reconstruction is a posthoc LINEAR current-field readout, not NSV's training-time future-field decoder and not a new end-to-end reconstruction training of the encoder. Targets are 180-longitude profiles, not full latitude-longitude maps. Variance-weighted R2 near zero means this decoder explains little held-out field variance; it does not prove zero information under arbitrary decoders.
+- Logged nb33 linear scores (phase accuracy / amplitude R2 / u850 R2 / OLR R2 / 30-90d PC1 power fraction): SSL2 = .235/.072/.159/.064/.420; aux3 = .325/.311/.282/.121/.571; BT3 = .121/.078/-.002/-.001/.030; BT7 = .120/.222/-.002/-.001/.098; NSV7 = .458/.339/.531/.213/.597. Phase/field tasks use active days, amplitude uses all days, NSV has a date-aligned subset. Dimension/backbone/checkpoint differences prevent treating this as a fully controlled objective-only causal ranking. Historical results are recorded in Sessions 56-58, not newly recomputed here.
+- SSL's phase MLP was .241 versus linear .235; RK proxy R2 about .386, convection-longitude R2 about zero. MC-crossing accuracy .752 did not beat majority baseline .754. The coherent description is partial intraseasonal wind information, not a validated full propagation/MC-crossing representation. The older 72% spectrum claim and table PC1 fraction 42% are not the same summary; use the table's specified statistic.
+- nb34 (MLP, own-RMM): BT3 amplitude R2=.063, circular correlation=.008, octant balanced accuracy=.134, mean angular error=90.0 degrees; BT7=.171/-.134/.156/82.2 degrees. Own-RMM-self MLP amplitude R2=.999 and phase correlation=1.00. BoM amplitude recovery for BT7 is about .21. Partial amplitude recovery is compatible with poor signed oscillatory-field reconstruction: knowing A without phase phi cannot reconstruct A*cos(k*x-phi).
+- September common-day whitened year-null results: MJO SSL z=5.01, NSV=6.20, BT7=2.71, BT3=2.95, supervised=8.71. These are association tests on the available record, not proof of causal modulation or strictly unseen-year generalization. Slow information is not identical to an explicit ENSO coordinate (BT balanced ENSO accuracy about .40). Most evaluated BSISO evidence was not robust to block/shift controls; its historical SSL14.55 row was initially unavailable, so do not declare all BSISO models conclusively negative.
+- L1a pilot: NSV h64 current-state ridge R2(theta,v)=.9996/.9923 and ID near2; NSV z_d2 readouts about zero. BT-temporal h has substantial state information (.974/.709 ridge), while its z2 is weak. This directly reinforces layer-specific interpretation and rules out treating the old “BT structurally cannot retain phase” wording as a general theorem. One seed, 20 test trajectories; no general method verdict.
+
+**Interpretive corrections:** retain “in the tested temporal-view MJO setup, BT projectors emphasized slow/envelope information and had little recoverable phase; contrastive and predictive representations retained more intraseasonal field information.” Do not retain universal claims that BT cannot represent phase, MLP failure proves information absence, prediction recovers the complete physical state, or objective alone determines content. High displacement, phase decodability, a polar phase clock, recoverable fields and correct dynamics answer different questions.
+
+**Statistical fallacy scan: 11/11 applicability checks.** Simpson: no new subgroup reanalysis; no universal aggregate ranking. Ecological: days versus ENSO years and windows versus independent trajectories distinguished. Berkson/collider: active-day conditioning and event selection restrict scope, no causal inference. Base-rate neglect: MC-crossing majority baseline and ENSO balanced accuracy retained. Regression-to-mean: no claim of future improvement from best runs. Survivorship: missing embeddings/rerun outputs noted. Look-elsewhere/forking paths: exploratory comparisons across lags, dimensions, losses and checkpoints retained, not confirmatory causal tests. Correlation/causation and reverse causality: association, current-state readout and future prediction separated from mechanism identification. Full raw-data verification was not attempted.
+
+Primary method references checked: Barlow Twins, https://proceedings.mlr.press/v139/zbontar21a.html ; Chen et al. NSV project/paper, https://www.cs.columbia.edu/~bchen/neural-state-variables/ .
+
+miao
+
+
+### Session 73 follow-up — What nb33 R1–R3 actually computes and how to run it (2026-11-03)
+
+User asked whether this recomputes RMM from reconstructed atmospheric fields, whether it had been run historically, and whether running R1–R3 answers the question. Re-read all three source cells and their dependencies. Confirmed minimal fresh-Colab order: notebook Cell 1 (imports, Drive mount, fields/labels, latent paths and loader, year masks) -> R1 -> R2 -> R3. Cells 2–6 and 5b are not required for this extension; R2 includes its own NSV recombination/date alignment. No encoder retraining or GPU is required; the evaluation fits Ridge readouts on training years and evaluates active validation-year days. Missing saved embeddings are skipped, so a partial table is not a complete method comparison.
+
+Implementation distinction: R1 fits P=Ridge(true bandpassed [u850,u200,OLR] -> saved own-RMM PCs), using training active days only. It is a learned linear approximation to own-RMM, not a rerun of the original RMM preprocessing/EOF procedure or a direct use of stored EOF loadings. R2 separately fits latent -> three current-field longitude profiles, then applies the same fixed P to those reconstructions. R3 plots the phase/amplitude metrics and true versus recovered RMM planes. R1 prints performance of P on true validation fields as a reference benchmark; it is not a mathematical upper bound on every downstream metric. Read that benchmark before interpreting reconstruction failures.
+
+Historical status remains UNKNOWN: repository notebook cells have null execution counts and no outputs; log has no returned R1–R3 numerical result; git records July 9 addition and NaN prediction fix, which cannot establish completed execution. Searched currently accessible connected Drive for exact output names and broadened image/folder matches; no results. Default document search excludes some CSV/image MIME types, so an image-specific search and latent_content folder search were also attempted. This is not proof that output never existed or was never run. No scientific cells executed and no notebook changes made this turn.
+
+Expected files under MJO/moisture_constraints/results/latent_content/: rmm_from_reconstruction.csv, rmm_from_reconstruction.png, rmm_recon_rings.png. The essential outputs to inspect are R1 CEILING/reference metrics and the R2 table; R3 provides visualization.
+
+miao
+
+
+### Session 73 follow-up — MJO Barlow temporal-pair spacing (2026-11-04)
+
+User asked how many days separate the Barlow temporal pairs. Checked current nb26 source: TAUS=[1,2,3,4,5], so pairs are (X_t, X_(t+tau)) at each of these five exact calendar-day lags; both dates must belong to the same training/validation split. The training uses all five lag-specific loaders, not only a fixed five-day lag. Current exponential schedule weights the full per-lag loss from 1.0 at one day to 0.05 at five days (approximately 1/.473/.224/.106/.05). This is the MJO nb26 configuration, distinct from pendulum frame-based pairs. No code changes or experiment execution.
+
+miao
+
+
+## Session 74 — Single-frame default and quantitative lag diagnostic (2026-11-04)
+
+User explicitly rejected concatenating five consecutive time steps, to align with one-day-per-sample MJO/BSISO inputs, and asked how much pendulum images change over5frames. Changed TrainConfig/Encoder/EvalConfig and generated notebooks39–42 to default window=1; retained temporal lag=5 as an independent parameter. Temporal pairs are(I_t,I_t+5), NSV predicts I_t+5 from I_t, and BT-same uses two views of I_t. Added run_tag single_frame and single-frame observability metadata in evaluation; no velocity channel added. Existing nearby-negative rule now has threshold window+lag=6. Data helper/source remains unchanged so prior datasets can be reused;40/41 require retraining and42 must use compatible single-frame features. Old five-frame reports were preserved and the architecture description explicitly labelled historical.
+
+Updated results/toy_oscillator_validation_plan.md to v4_single_frame, notebook README and interpretation notes. A single position-only image at fixed length depends on theta but not velocity, so no unique velocity sign/full(theta,v) recovery or ID=2 gate is appropriate. Visible continuous length adds(theta,L); hidden length remains absent from a snapshot. Physical oracle2/3 remains a separate reference. One-day multivariable climate observations need not have the same observability as position-only pendulum images.
+
+Added `results/toy_pendulum/173b0c7eaac813d1/measure_frame_lag.py` and `frame_lag_diagnostic/` (README, statistics.json, PNG/PDF). This reconstructs the fixed-length simulator with archived settings/seed and matching data-code SHA, uses60train trajectories and198common anchors each (11880pairs), and renders quantized clean frames without augmentation.5frames=0.628319dimensionless time=0.1T0; small-angle reference phase advance36degrees, distinct from rod-angle change. Absolute angle change mean10.842deg, median9.524deg, p9524.804deg, max37.010deg. Bob displacement median4.393px, p9511.366px, max16.796px on64x64images. Lag1 gives median1.935deg/0.894px and p955.036deg/2.325px. Lag5 mean pixel RMSE0.06274 versus two independent std0.01 augmentations' theoretical difference RMS0.01414. Typical lag5 change is visibly substantial, although changes near turning points can be small. Figures choose train displacement P5/P50/P95 examples; no model/test-score selection.
+
+Provenance limit: the uploaded ZIP lacks original fixed.npz. Reconstructed npz byte hash does not match recorded original; cause cannot be resolved without original arrays. Numerical integration checks agree to floating-point error scale (step-halving about1.2056954e-8, max energy increment−3.8365408e-8). Measurements are explicitly reported as recomputation from original config, not byte-verified original-array statistics. No formal dataset/training run was launched; CPU diagnostic arrays stayed in memory.
+
+Validation: all8existing tests passed (8.022s), including the updated tiny single-frame end-to-end path for all4objectives, refinement, evaluation/reuse, and noisy hidden-L branch; explicit history shape/gradient checks remain covered. All4generated notebooks match the builder and git diff --check passes. No package installation, formal single-frame GPU training, commit or push in this turn.
+
+
+## Session 75 — Publish single-frame retraining notebooks (2026-11-04)
+
+User requested pushing the changes to GitHub for Colab retraining. Prepared notebooks39–42, single-frame training/evaluation defaults, documentation, the revised validation plan, conversation history, and the small archived L1a analysis/lag-diagnostic artifacts for publication on main. Existing simulator data remain reusable; rerun40/41 with window=1 and lag=5, then42 with window=1. Default run_tag is single_frame, and old window=5 runs are filtered out of the new evaluation.
+
+Fetched origin/main and found the user's Colab commit d8b0876, which adds a report-ZIP download cell to notebook42. Integrated that exact cell into build_notebooks.py and regenerated42 so future builds retain it; added a numbered Cell6 label and README note. Remote commit history is retained when integrating the local changes. Generated notebooks carry clean execution state.
+
+Validation: all four generated notebooks match the builder; git diff --check passes; the preserved Colab export source matches the remote source exactly and compiles. The eight single-frame/unit tests passed in Session74; no learning/evaluation logic changed in this publication step. Reviewed 50 new analysis files (about1.87MB total), with no raw image arrays or checkpoints and no credential-pattern matches. No formal training was launched locally.
+
+miao

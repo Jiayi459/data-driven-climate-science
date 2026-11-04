@@ -23,7 +23,7 @@ from l1_data import (CONDITIONS, digest, estimate_id, file_sha, frame_cache, ind
 @dataclass(frozen=True)
 class TrainConfig:
     seed: int = 42
-    window: int = 5
+    window: int = 1
     lag: int = 5
     train_stride: int = 2
     eval_stride: int = 4
@@ -38,7 +38,7 @@ class TrainConfig:
     temperature: float = 0.1
     barlow_offdiag: float = 0.005
     view_noise_std: float = 0.01
-    run_tag: str = "pilot"
+    run_tag: str = "single_frame"
 
     def validate(self):
         if min(self.window, self.lag, self.train_stride, self.eval_stride, self.hidden_dim,
@@ -90,7 +90,7 @@ class WindowDataset(Dataset):
 
 
 class Encoder(nn.Module):
-    def __init__(self, window=5, hidden_dim=64):
+    def __init__(self, window=1, hidden_dim=64):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(window, 16, 5, 2, 2), nn.GroupNorm(4, 16), nn.SiLU(),

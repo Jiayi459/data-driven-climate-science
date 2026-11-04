@@ -80,6 +80,10 @@ def notebooks():
         Every condition is compared with NSV, InfoNCE, BT-temporal and BT-same-time.
         These are data conditions, not successive learning algorithms.
 
+        The default learning input is one frame per sample (updated 2026-11-04).
+        The simulator's two-state oracle is unchanged; a position-only snapshot does
+        not identify angular velocity. Earlier five-frame results are a separate protocol.
+
         $\\dot\\theta=v$, $\\dot v=-\\gamma v-(g/L)\\sin\\theta$.
         All L1a–c trajectories have constant L internally. No force noise or continuous
         physical length change in this implementation. Store small state arrays on Drive;
@@ -177,9 +181,12 @@ def notebooks():
     train_intro = md('''
         ## Protocol shared by notebooks 40 and 41
 
-        All methods use the same CNN backbone, frame history, trajectory split, initial
-        encoder seed and evaluation rows. Default window = lag = 5: temporal views do not
-        overlap. A separate `view_noise_std=0.01` training augmentation is recorded even
+        All methods use the same CNN backbone, input length, trajectory split, initial
+        encoder seed and evaluation rows. Default window=1: one frame is one sample,
+        with no consecutive-frame concatenation. Temporal lag remains 5 frames:
+        InfoNCE/BT-temporal pair I(t) with I(t+5); NSV predicts I(t+5) from I(t).
+        BT-same pairs independent views of I(t). Input length and pair lag are independent.
+        A separate `view_noise_std=0.01` training augmentation is recorded even
         for clean L1a; all input branches receive it. To study zero augmentation, set it
         explicitly to zero (BT-same then has identical views in L1a).
 
@@ -187,6 +194,12 @@ def notebooks():
         same-time views use independent synthetic observation realizations. NSV targets
         are future **observations**, not oracle clean frames or physical labels.
         Stage/model selection uses validation only; test labels are first used in 42.
+        A clean fixed-L snapshot depends on theta, not velocity. Velocity readout and
+        future prediction measure information missing from this observation; do not
+        require recovery of the full two-state oracle from one position-only frame.
+        For L1c, visible-length snapshots depend on (theta,L), hidden-length ones on theta.
+        Earlier window=5 runs remain valid historical controls but are not compatible
+        with window=1 evaluation. Existing simulator data can be reused; retrain 40/41.
         A completed run is reused by exact config hash. Incomplete runs are not overwritten;
         inspect them or change `run_tag`. Full rerun/resume of partial epochs is not implemented.
         ''')
@@ -202,8 +215,8 @@ def notebooks():
         DATASET_ID = ''  # paste from notebook 39; blank works only if exactly one dataset exists
         CONDITIONS_TO_RUN = ['L1a']  # later: L1b_s002, L1b_s005, L1c_visible, L1c_hidden
         SEEDS = [42]  # pilot first; then [42, 43, 44] with the same list in notebook 41
-        BASE = TrainConfig(window=5, lag=5, epochs=30, refine_epochs=60,
-                           batch_size=128, view_noise_std=0.01, run_tag='pilot')
+        BASE = TrainConfig(window=1, lag=5, epochs=30, refine_epochs=60,
+                           batch_size=128, view_noise_std=0.01, run_tag='single_frame')
         DATASET_ID = resolve_dataset_id(DATASET_ID)
         if not torch.cuda.is_available():
             raise RuntimeError('Select Colab Runtime > Change runtime type > T4 GPU for training.')
@@ -218,10 +231,12 @@ def notebooks():
         # Notebook 40 — L1 Pendulum: Neural State Variables
         **Runtime:** Colab T4 GPU. **Prerequisite:** notebook 39.
 
-        Predict a future image window through a 64-D encoder; estimate intrinsic dimension
+        Predict a future single frame through a 64-D encoder; estimate intrinsic dimension
         on training embeddings only; fit SIREN refiners at d=1/2/3/4/8. No physical labels
         enter these losses. The sweep is intentional: do not force an ID estimate to equal
-        2 or 3. Compare with the project NSV pipeline and with same-dimensional SSL outputs.
+        2 or 3. A single position-only frame does not identify velocity, so physical
+        state dimension is not the expected clean snapshot dimension. Compare with
+        the project NSV pipeline and with same-dimensional SSL outputs.
         Full autonomous latent rollouts are not implemented here; notebook 42 evaluates
         common direct forecasts and state readouts.
         ''') , train_intro,
@@ -284,8 +299,8 @@ def notebooks():
         **Runtime:** Colab T4 GPU. **Prerequisite:** notebook 39; run 40 for the NSV comparison.
 
         `infonce`: cosine symmetric cross-view contrastive loss on temporal pairs.<br>
-        `bt_temporal`: redundancy reduction on shifted windows.<br>
-        `bt_same`: redundancy reduction on two observations of the same state window.
+        `bt_temporal`: redundancy reduction on temporally separated frames.<br>
+        `bt_same`: redundancy reduction on two observations of the same frame.
 
         InfoNCE's positive target is always the matched row; overlapping nearby windows
         from the same trajectory are masked as negatives. Distant recurrence can still
@@ -297,7 +312,7 @@ def notebooks():
         md('## Cell 3 — Matched training configuration'), cell(train_config),
         cell('''
         METHODS = ['infonce', 'bt_temporal', 'bt_same']
-        PROJECTION_DIMS = [2]  # add 3/4/8 for a dimension sweep; include 3 for L1c
+        PROJECTION_DIMS = [2]  # optional 1/2/3/4/8 sweep; coordinate count is not a known physical ID
         ''') ,
         md('## Cell 4 — Train each objective from the same encoder initialization'),
         cell('''
@@ -355,7 +370,7 @@ def notebooks():
 
         DATASET_ID = ''
         CONDITIONS_TO_EVALUATE = ['L1a']
-        EVALUATION = EvalConfig(window=5, stride=4, bootstrap_repeats=300, nonlinear_probe=True)
+        EVALUATION = EvalConfig(window=1, stride=4, bootstrap_repeats=300, nonlinear_probe=True)
         # Empty mapping uses all completed runs matching history/stride; never chooses "best test".
         # To compare a prespecified subset, map condition -> list of exact run directory names.
         SELECTED_RUN_IDS = {}
@@ -398,14 +413,55 @@ def notebooks():
                 display(Image(filename=str(output / name)))
             print('All configurations and seeds remain separate in:', output / 'scorecard.csv')
         ''') ,
+        md('## Cell 6 — Download reports for analysis'),
+        cell('''
+        from pathlib import Path
+        from zipfile import ZipFile, ZIP_DEFLATED
+        import json
+        from google.colab import files
+
+        assert RESULTS, "请先运行 notebook 42 的比较单元。"
+        root = Path(L1_ROOT)
+        folders = [root / "datasets" / DATASET_ID]
+
+        # 收集本次评估，以及它实际使用的训练 runs
+        for condition, (output, _) in RESULTS.items():
+            output = Path(output)
+            folders.append(output)
+            evaluation = json.loads((output / "evaluation.json").read_text())
+            for run in evaluation["runs"]:
+                folders.append(
+                    root / "runs" / DATASET_ID / condition / run["run_id"]
+                )
+
+        # 首轮分析只打包报告、配置、训练曲线数据和图片
+        paths = sorted({
+            p
+            for folder in folders
+            for p in folder.iterdir()
+            if p.is_file() and p.suffix.lower() in {".json", ".csv", ".png"}
+        })
+
+        zip_path = Path("/content") / f"pendulum_results_{DATASET_ID}.zip"
+        with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
+            for p in paths:
+                archive.write(p, arcname=str(p.relative_to(root)))
+
+        print("包含条件：", list(RESULTS))
+        print(f"已打包 {len(paths)} 个文件：{zip_path}")
+        files.download(str(zip_path))
+        ''') ,
         md('''
         ## Interpretation checklist
 
-        - L1a: recover velocity direction and decaying motion; a closed ring is not required.
+        - L1a: assess angle recovery; velocity/future readouts diagnose information missing
+          from a single position-only frame. A closed ring or ID=2 is not required.
         - L1b: compare the same initial conditions and split with L1a, at matched method settings.
         - L1c: length is continuous, constant per trajectory; compare visible and hidden rendering.
         - Compare encoder h and projector z; InfoNCE normalized z_unit removes radial information.
-        - ID ~2/3 is a conditional physical reference; noise and sampling can alter estimates.
+        - Physical state ID ~2/3 is distinct from snapshot geometry: clean fixed-L/hidden-L
+          images depend on theta, visible-L images on (theta,L). Noise/finite sampling
+          can change estimated ID. No velocity channel is added to the single frame.
         - Figures display the first available run/low-dimensional feature per method in a fixed
           order for readability. The CSV contains every run; no run is selected by test quality.
         - Initial pilot settings are not evidence that any method works. Report actual held-out

@@ -21,7 +21,7 @@ from l1_data import (CONDITIONS, digest, estimate_id, file_sha, frame_cache, ind
 @dataclass(frozen=True)
 class EvalConfig:
     seed: int = 123
-    window: int = 5
+    window: int = 1
     stride: int = 4
     pca_components: int = 64
     pca_fit_samples: int = 3000
@@ -146,6 +146,11 @@ def compare(root, dataset_id, condition, cache_root, run_paths, cfg=EvalConfig()
         return out, pd.read_csv(out/"scorecard.csv")
     out.mkdir(parents=True, exist_ok=True)
     json_write(out/"evaluation.json", {**identity, "pca_variance_ratio": variance,
+               "input_protocol": "single_frame" if cfg.window == 1 else "frame_history",
+               "observability_note": (
+                   "Position-only rendering cannot uniquely identify velocity from one frame; "
+                   "state ID 2/3 and full-state recovery are not single-frame acceptance criteria."
+                   if cfg.window == 1 else "History provides temporal information; assess observability empirically."),
                "bootstrap_unit": "length group" if spec["kind"] == "variable" else "trajectory",
                "forecast_type": "direct multi-horizon readout, NOT an autonomous rollout",
                "truth_use": "evaluation probes only; never representation training",

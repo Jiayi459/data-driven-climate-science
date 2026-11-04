@@ -1,0 +1,26 @@
+{
+  "n_sampled": 2000,
+  "scales": [
+    {
+      "k": 10,
+      "n_valid": 2000,
+      "median_id": 1.9923903701272474,
+      "mean_id": 2.303564381015849
+    },
+    {
+      "k": 20,
+      "n_valid": 2000,
+      "median_id": 2.140334781699089,
+      "mean_id": 2.3623924796761484
+    },
+    {
+      "k": 40,
+      "n_valid": 2000,
+      "median_id": 2.1302651309407326,
+      "mean_id": 2.3391929685893467
+    }
+  ],
+  "participation_ratio": 3.145419850736112,
+  "neighbor_exclusion": "same group",
+  "used_split": "train"
+}

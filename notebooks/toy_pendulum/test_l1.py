@@ -150,7 +150,7 @@ class LearningTests(unittest.TestCase):
         from l1_learning import TrainConfig, run_training
         cfg = SimulationConfig(n_fixed=10, n_length_groups=5, trajectories_per_length=2,
                                periods=3, frames_per_period=12)
-        train = TrainConfig(window=3, lag=3, train_stride=8, eval_stride=4,
+        train = TrainConfig(window=1, lag=3, train_stride=8, eval_stride=4,
                             hidden_dim=8, batch_size=8, epochs=1, refine_epochs=1,
                             refine_dims=(2, 3), run_tag='unit-test-only')
         with tempfile.TemporaryDirectory(prefix='ddcs_l1_test_') as tmp:
@@ -166,7 +166,7 @@ class LearningTests(unittest.TestCase):
                     if method == 'nsv':
                         self.assertEqual(f['z_d3'].shape[1], 3)
                 self.assertEqual(path, run_training(tmp, dataset_id, 'L1a', cache, train, method, device='cpu'))
-            evaluation = EvalConfig(window=3, stride=4, pca_components=4, pca_fit_samples=40,
+            evaluation = EvalConfig(window=1, stride=4, pca_components=4, pca_fit_samples=40,
                                     bootstrap_repeats=20, nonlinear_probe=True, nonlinear_max_iter=5)
             out, score = compare(tmp, dataset_id, 'L1a', cache, paths, evaluation)
             self.assertEqual(set(score.method), {'nsv', 'infonce', 'bt_temporal', 'bt_same',
@@ -175,6 +175,7 @@ class LearningTests(unittest.TestCase):
             self.assertEqual(set(score.variable), {'theta', 'velocity'})
             self.assertTrue((out/'state_readout_test.png').exists())
             self.assertIn('mlp64', set(score.probe))
+            self.assertEqual(json.loads((out/'evaluation.json').read_text())['input_protocol'], 'single_frame')
             cached_out, cached_score = compare(tmp, dataset_id, 'L1a', cache, paths, evaluation)
             self.assertEqual(out, cached_out)
             self.assertEqual(len(score), len(cached_score))

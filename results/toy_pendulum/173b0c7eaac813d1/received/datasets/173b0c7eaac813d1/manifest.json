@@ -1,0 +1,38 @@
+{
+  "schema": "pendulum-l1-v1",
+  "simulation": {
+    "seed": 20261027,
+    "n_fixed": 100,
+    "n_length_groups": 60,
+    "trajectories_per_length": 5,
+    "periods": 8.0,
+    "frames_per_period": 50,
+    "substeps": 8,
+    "g": 1.0,
+    "reference_length": 1.0,
+    "damping": 0.02,
+    "length_min": 0.8,
+    "length_max": 1.2,
+    "image_size": 64
+  },
+  "source_sha": "6aa1ebbee65e65260fed1a85e9f0ecddc58375967c105d5b6af1618de33e69a2",
+  "dataset_id": "173b0c7eaac813d1",
+  "checks": {
+    "fixed": {
+      "rk4_step_halving_max_error": 1.2056953612588073e-08,
+      "max_energy_increment": -3.836540822099027e-08,
+      "n_trajectories": 100,
+      "frames_per_trajectory": 401
+    },
+    "variable": {
+      "rk4_step_halving_max_error": 1.2947552360115244e-08,
+      "max_energy_increment": -3.823021573531177e-08,
+      "n_trajectories": 300,
+      "frames_per_trajectory": 401
+    }
+  },
+  "data_sha256": {
+    "fixed": "97c9ac9880ebb33bc7e4ec2d6d88e1403bf1132dcca1a8ca2205acacbdc191ce",
+    "variable": "069df6dc8b706115b576ab8aeaf7fe7ab116d1f0c08f2ddefa54a3a904f4ea1e"
+  }
+}
