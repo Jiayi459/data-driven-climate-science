@@ -107,6 +107,9 @@ class DataTests(unittest.TestCase):
                 if c.cell_type != 'code':
                     continue
                 source = c.source
+                if source.startswith('%pip '):
+                    self.assertIn('scikit-dimension==0.3.4', source)
+                    continue  # Colab dependency cell is deliberately not Python syntax.
                 if source.startswith('%%writefile '):
                     first, source = source.split('\n', 1)
                     self.assertEqual(source, (HERE/first.split()[-1]).read_text())

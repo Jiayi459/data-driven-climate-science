@@ -28,6 +28,9 @@ class EvalConfig:
     bootstrap_repeats: int = 300
     nonlinear_probe: bool = True
     nonlinear_max_iter: int = 200
+    protocol: str | None = None  # None allows historical comparisons; notebooks choose explicitly
+    tsne: bool = False
+    tsne_max_samples: int = 1000
 
 
 def ridge_probe(x, y, splits):
@@ -106,7 +109,7 @@ def completed_runs(root, dataset_id, condition):
 
 
 def compare(root, dataset_id, condition, cache_root, run_paths, cfg=EvalConfig()):
-    if cfg.bootstrap_repeats < 1 or cfg.pca_fit_samples < 2:
+    if cfg.bootstrap_repeats < 1 or cfg.pca_fit_samples < 2 or cfg.tsne_max_samples < 2:
         raise ValueError("Invalid evaluation sample counts.")
     spec = CONDITIONS[condition]
     bundle, sim, manifest = load_dataset(root, dataset_id, spec["kind"])
@@ -122,6 +125,9 @@ def compare(root, dataset_id, condition, cache_root, run_paths, cfg=EvalConfig()
             raise ValueError(f"Incompatible dataset/condition: {path}")
         if meta["training"]["window"] != cfg.window or meta["training"]["eval_stride"] != cfg.stride:
             raise ValueError(f"History/evaluation stride mismatch: {path}")
+        protocol = meta["training"].get("protocol", "legacy")
+        if cfg.protocol is not None and protocol != cfg.protocol:
+            raise ValueError(f"Training protocol mismatch: {path}")
         if file_sha(path/"features.npz") != complete["features_sha256"]:
             raise ValueError(f"Feature checksum mismatch: {path}")
         with np.load(path/"features.npz", allow_pickle=False) as features:
@@ -133,7 +139,8 @@ def compare(root, dataset_id, condition, cache_root, run_paths, cfg=EvalConfig()
                 # Keep training seeds/configs separate; never select the best seed on test.
                 label = f"{meta['run_id']}:{key}"
                 representations[label] = (features[key].copy(), meta["method"], key, meta["training"]["seed"])
-        run_meta.append({"run_id": meta["run_id"], "features_sha": complete["features_sha256"]})
+        run_meta.append({"run_id": meta["run_id"], "features_sha": complete["features_sha256"],
+                         "protocol": protocol, "feature_semantics": meta.get("feature_semantics", "legacy h/projector features")})
     pca_features, variance = delay_pca(frames, bundle, sim, condition, index, cfg)
     representations["delay_pca"] = (pca_features, "delay_pca", "pca", None)
     identity = {"dataset_id": dataset_id, "condition": condition, "config": asdict(cfg),
@@ -203,19 +210,80 @@ def compare(root, dataset_id, condition, cache_root, run_paths, cfg=EvalConfig()
     json_write(out/"id_train.json", ids)
     np.savez_compressed(out/"evaluation_truth.npz", index=index, states=truth, splits=splits, groups=groups)
     plot_results(out, representations, scorecard, truth, splits, groups, index, current_predictions)
+    plot_native_and_tsne(out, representations, truth, splits, cfg)
     json_write(out/"complete.json", {"scorecard_sha256": file_sha(out/"scorecard.csv")})
     return out, scorecard
+
+
+def display_representations(representations):
+    """One representation per RUN, preferring z (including NSV's selected ID)."""
+    selected, seen = [], set()
+    for feature_order in ("z", "z_d2", "z_d3", "pca"):
+        for label, (x, method, feature, seed) in representations.items():
+            run_id = label.rsplit(":", 1)[0] if ":" in label else label
+            if run_id not in seen and feature == feature_order:
+                selected.append((label, x, method, feature))
+                seen.add(run_id)
+    return selected
+
+
+def display_title(label, x, method, feature):
+    return f"{method} / {feature} ({x.shape[1]}D)\n{label.split(':')[0][-8:]}"
+
+
+def plot_native_and_tsne(out, representations, truth, splits, cfg):
+    """Display transforms never enter a probe, ID estimate or model selection."""
+    import inspect
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator, ScalarFormatter
+    from sklearn.manifold import TSNE
+    selected = display_representations(representations)
+    test = np.flatnonzero(splits == 2)[::3]
+    if len(test) > cfg.tsne_max_samples:
+        test = np.sort(np.random.default_rng(cfg.seed).choice(test, cfg.tsne_max_samples, replace=False))
+    if cfg.tsne and len(test) < 2:
+        raise ValueError("t-SNE requires at least two displayed test samples.")
+    for mode in (["native", "tsne"] if cfg.tsne else ["native"]):
+        fig, axes = plt.subplots(2, len(selected), figsize=(4*len(selected), 7), squeeze=False)
+        saved = {"sample_indices": test}
+        for col, (label, x, method, feature) in enumerate(selected):
+            if mode == "native":
+                xy = x[test, :2]
+                if xy.shape[1] == 1:
+                    xy = np.column_stack((xy[:, 0], np.zeros(len(xy))))
+                axes_labels = ("coordinate 1", "coordinate 2" if x.shape[1] > 1 else "zero padding (1D representation)")
+            else:
+                params = dict(n_components=2, perplexity=min(30.0, max(1.0, (len(test)-1)/3)),
+                              init="pca" if x.shape[1] >= 2 else "random", learning_rate="auto", random_state=0)
+                # scikit-learn renamed n_iter in newer Colab versions.
+                params["max_iter" if "max_iter" in inspect.signature(TSNE).parameters else "n_iter"] = 1000
+                xy = TSNE(**params).fit_transform(x[test])
+                axes_labels = ("t-SNE 1 (display only)", "t-SNE 2 (display only)")
+            saved[label] = xy
+            for row, variable in enumerate(["angle", "angular velocity"]):
+                ax = axes[row, col]
+                sc = ax.scatter(xy[:, 0], xy[:, 1], c=truth[test, row], s=5, cmap="coolwarm")
+                ax.set_title(display_title(label, x, method, feature)+f"\ncolored by {variable}")
+                ax.set_xlabel(axes_labels[0]); ax.set_ylabel(axes_labels[1])
+                for axis in (ax.xaxis, ax.yaxis):
+                    axis.set_major_locator(MaxNLocator(3))
+                    formatter = ScalarFormatter(useOffset=True)
+                    formatter.set_powerlimits((-3, 3))
+                    axis.set_major_formatter(formatter)
+                fig.colorbar(sc, ax=ax)
+        fig.tight_layout(); fig.savefig(Path(out)/f"latent_{mode}_test.png", dpi=140); plt.close(fig)
+        np.savez_compressed(Path(out)/f"latent_{mode}_coordinates.npz", **saved)
+    json_write(Path(out)/"display_protocol.json", {
+        "native": "first two untransformed feature coordinates; 1D zero-padded; higher dimensions omitted",
+        "pca": "fit on train features, then transform test; latent_test.png",
+        "tsne": "fit_transform on displayed test subset ONLY; descriptive, not an out-of-sample map" if cfg.tsne else "disabled",
+        "used_by_probes": False, "one_view_per": "run, preferring z", "tsne_seed": 0})
 
 
 def plot_results(out, representations, scores, truth, splits, groups, index, current_predictions):
     import matplotlib.pyplot as plt
     # Each latent display projection is fitted on train, including when showing test.
-    selected = []
-    seen = set()
-    for label, (x, method, feature, seed) in representations.items():
-        if method not in seen and (feature in {"z", "z_d2", "z_d3", "pca"}):
-            selected.append((label, x, method, feature))
-            seen.add(method)
+    selected = display_representations(representations)
     colors = [(0, "angle"), (1, "angular velocity")]
     if truth[:, 2].std() > 1e-8:
         colors.append((2, "pendulum length"))
@@ -230,7 +298,7 @@ def plot_results(out, representations, scores, truth, splits, groups, index, cur
             xy = np.column_stack((xy, np.zeros(len(xy))))
         for row, (j, name) in enumerate(colors):
             sc = axes[row, col].scatter(xy[:, 0], xy[:, 1], c=truth[test_idx, j], s=5, cmap="coolwarm")
-            axes[row, col].set_title(f"{method} / {feature}\ncolored by {name}")
+            axes[row, col].set_title(display_title(label, x, method, feature)+f"\ncolored by {name}")
             axes[row, col].set_xlabel("train-fitted PC1")
             axes[row, col].set_ylabel("train-fitted PC2")
             fig.colorbar(sc, ax=axes[row, col])
@@ -239,11 +307,11 @@ def plot_results(out, representations, scores, truth, splits, groups, index, cur
     plt.close(fig)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-    for label, _, method, feature in selected:
+    for label, x, method, feature in selected:
         subset = scores[(scores.label == label) & (scores.probe == "ridge") & (scores.horizon_frames > 0)]
         for ax, name in zip(axes, ["theta", "velocity"]):
             part = subset[subset.variable == name].sort_values("horizon_frames")
-            ax.plot(part.horizon_periods, part.rmse, "o-", label=f"{method}/{feature}")
+            ax.plot(part.horizon_periods, part.rmse, "o-", label=f"{method}/{feature}/{x.shape[1]}D/{label.split(':')[0][-6:]}")
             ax.fill_between(part.horizon_periods.to_numpy(), part.rmse_ci_low.to_numpy(),
                             part.rmse_ci_high.to_numpy(), alpha=0.12)
             ax.set(xlabel="forecast horizon / reference period", ylabel=f"{name} RMSE",
@@ -262,8 +330,9 @@ def plot_results(out, representations, scores, truth, splits, groups, index, cur
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
     for j, name in enumerate(["theta", "velocity"]):
         axes[j].plot(index[mask, 1], truth[mask, j], "k-", linewidth=2, label="truth")
-        for label, _, method, feature in selected:
-            axes[j].plot(index[mask, 1], current_predictions[label][mask, j], label=f"{method}/{feature}", alpha=0.7)
+        for label, x, method, feature in selected:
+            axes[j].plot(index[mask, 1], current_predictions[label][mask, j],
+                         label=f"{method}/{feature}/{x.shape[1]}D/{label.split(':')[0][-6:]}", alpha=0.7)
         axes[j].set(xlabel="frame", ylabel=name, title=f"Held-out trajectory {tr}: linear readout")
         axes[j].legend(fontsize=7)
     fig.tight_layout()

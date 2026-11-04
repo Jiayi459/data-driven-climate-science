@@ -6413,3 +6413,148 @@ Fetched origin/main and found the user's Colab commit d8b0876, which adds a repo
 Validation: all four generated notebooks match the builder; git diff --check passes; the preserved Colab export source matches the remote source exactly and compiles. The eight single-frame/unit tests passed in Session74; no learning/evaluation logic changed in this publication step. Reviewed 50 new analysis files (about1.87MB total), with no raw image arrays or checkpoints and no credential-pattern matches. No formal training was launched locally.
 
 miao
+
+
+### Session 75 follow-up — What a single-frame temporal pair contains (2026-11-04)
+
+User asked whether each input pair now consists of two frames separated by5frames. Rechecked WindowDataset and notebook defaults: window=1, lag=5. InfoNCE and temporal Barlow pair augmented observations of I_t and I_(t+5) from the same trajectory; each branch receives one [1,64,64] image, or [B,1,64,64] for a batch, and shares the encoder. The two images are not concatenated into one input vector. NSV uses I_t as encoder input and I_(t+5) as its prediction target. Barlow same-time instead uses two independently augmented views of I_t, with zero temporal separation. Example temporal pair: frames100and105; frames101–104 are not included in that pair's inputs. No code changes or experiments.
+
+miao
+
+
+### Session 73 follow-up — Time separation of the two vectors entering Barlow C (2026-11-04)
+
+User clarified that they mean the two embedding vectors paired to form the covariance/cross-correlation matrix. Verified nb26: zA=projector(encoder(X_t)), zB=projector(encoder(X_(t+tau))), tau in [1,2,3,4,5] actual days. Each C(tau) is built from a batch of pairs sharing that lag; the anchor dates vary across batch rows. Columns are latent features, rows are samples. The code standardizes each branch over the batch and computes C=zA.T@zB/B, so it is cross-correlation, not a covariance estimate from only two observations. Each training step computes the five lag-specific losses, sums them and backpropagates once. No notebook changes or runs.
+
+miao
+
+
+## Session 76 — Analyze single-frame results and explain latent axes/PCA/augmentation (2026-11-04)
+
+User supplied the new latent_test.png and requested browsing the entire Downloads/pendulum_results_173b0c7eaac813d1 (1) directory, explaining noise augmentation, each pattern, axis/color units and whether PCA on z2 only changes coordinates. Applied academic-research-suite validate mode inline. Reviewed34 result files (27JSON,6PNG,1CSV;4DS_Store ignored), all146 score rows, training/refinement/probe metadata and all figures. All three helper SHA values match metadata, scorecard checksum matches complete.json, rows are unique; dataset reports match the earlier archive. FourL1a runs use seed42,window1,lag5,view_noise_std.01; test20trajectories/1520samples, plotted507points. No training/feature recomputation; Verification Status ANALYZED.
+
+Explained augmentation as independent pixel Gaussian perturbations I+.01*N(0,1), not force/angle noise. Temporal SSL augments two separate frames, BTsame augments one frame twice, NSV augments input only. L1a observation noise=0, and feature extraction applies no training augmentation. PCA axes are arbitrary representation coordinates, not theta/velocity. Top and bottom rows share coordinates; colors are raw true theta(rad) and velocity(rad per simulation-time unit), not standardized and not calendar-day units. Pendulum angle differs from oscillation phase.
+
+Confirmed plotted SSLz and NSVz_d2 are already2D; train-fitted PCA does centering+orthogonal rotation/possible reflection, no whitening or information reduction. Directz1/z2 plot is valid. z comes from projector/refiner encoder, not decoder. PCA64 baseline is the exception: final plotting reduces64to2, while probes use64; its legacy delay_pca name does not imply history whenwindow1.
+
+New ridge angleR2 for displayed features: BTsame.478910(MLP.847874,iteration warning), BTtemporal.999335, InfoNCE.983096(MLP.996215), NSVz_d2-.000315, PCA64.999999. All fourh64 retain angle(ridge>.999); current velocity readouts about0 across methods, consistent with single-position-frame nonobservability. BTtemporal plot PC2~1e-3 versusPC1~1, PR1.00000092 and localID~1: near-line geometry, autoscaling exaggerates waves. InfoNCE U-curve is a nonlinear embedding of angle, not a two-variable phase portrait. NSVh angleR2.999631 vs failedz_d2 localizes the weakness to refinement/representation; cloud appearance and estimatedID~2 do not establish recovery. Sine high-frequency folding plus finite sampling is only a possible explanation, not verified withoutfeatures/checkpoints.
+
+Also inspected current-readout, direct-forecast and NSVimage-prediction plots. Quarter-period future velocity is recoverable from angle(BTtemporalR2.98836), consistent with near-harmonic dynamics despite unobservable currentvelocity; future-angle and velocity scores need not worsen monotonically with horizon. NSV future image blur is compatible with an ambiguous-future conditional mean underMSE but one example cannot establish a unique cause. Four finiteMLP probes have convergence warnings; no seed-general or causal superiority claim. Checked11/11 statistical-fallacy applicability items.
+
+Saved analysis.md, audit.json (complete source-file hashes/configs/ID/history/probe summaries), and scorecard.csv under results/toy_pendulum/173b0c7eaac813d1/single_frame/45eeb9463f6b0f10/. Original downloads and all implementation/notebook files left unchanged; no commit or push requested this turn.
+
+miao
+
+
+### Session 76 follow-up — Encoder, projector, refiner encoder and decoder (2026-11-04)
+
+User annotated the distinction between projector/refiner encoder outputs and decoder outputs, asking what each module does and what the projector does to the latent representation. Rechecked l1_learning.py. CNN encoder maps one image to h64. SSL projector is Linear64→128, LayerNorm128, SiLU, Linear128→2; it learns a nonlinear re-encoding, with InfoNCE/Barlow loss on its outputs and gradients updating both projector and CNN. It is not posthoc PCA, need not be invertible, and does not explicitly optimize reconstruction of h or physical coordinates. h and z are both latent representations of different layers; choosing projection_dim=2 does not infer two physical variables.
+
+NSV first stage trains image→CNN h64→image decoder→future image jointly by image MSE. Stage2 takes fixed saved h, standardizes it with training statistics, and trains a separate refiner encoder64→128→64→d and refiner decoder d→64→128→64 using sine activations and h-reconstruction MSE; CNN is not updated in refinement. Thus projector and refiner encoder both map features to a new representation but have different objectives and training stages. Decoder maps a representation into a prediction/reconstruction target space, not necessarily a larger dimension. Explained that loss-specific transformations can change geometry and readout accessibility; poorz readout does not establish poorh, and failed finite probes do not prove complete information absence. No code changes or experiment execution.
+
+miao
+
+
+### Session 76 follow-up — Exact losses and joint versus staged training (2026-11-04)
+
+User asked via two response annotations for explicit InfoNCE/Barlow/NSV losses, whether encoder and projector each have a different loss, and whether refiner encoders are only used in NSV. Rechecked l1_learning.py. Clarification: in current InfoNCE and both Barlow variants, CNNencoder and MLPprojector are trained jointly by one scalar method-specific loss computed onz, not separate encoder/projector losses. Different architectural roles do not imply separate objectives; gradient flows through projector into CNN. Each method is a separate model/run, not a sum of all methods' losses.
+
+InfoNCE: per-sample L2-normalize both views; s_ij=dot(u_i^A,u_j^B)/0.1; set s_ij=-infinity for i!=j, same trajectory and abs(t_i-t_j)<window+lag=6. Loss=-1/(2B)*sum_i[log(exp(s_ii)/sum_j exp(s_ij))+log(exp(s_ii)/sum_j exp(s_ji))]. The designated pair is the positive; remaining unmasked opposite-view rows are negatives.
+
+Barlow: per-coordinate batch mean/variance normalization with population variance plus epsilon1e-5; C_kl=(1/B)sum_i ztilde_ik^A*ztilde_il^B. Loss=sum_k(1-C_kk)^2+.005*sum_(k!=l)C_kl^2. ForD2 this has two diagonal and two off-diagonal squared terms. BTsame and BTtemporal use the identical formula with same-time versus lag5 inputs. Neither imposes an explicit h-reconstruction or theta/velocity target.
+
+NSV stage1: CNNencoder+image decoder jointly minimize mean squared future-image error over batch and pixels; no SSLMLPprojector in this branch. Stage2: originalCNN/savedh fixed; standardize h using train mean and floored std, then independently for eachd train refiner encoder r and refiner decoder q to minimize mean squared error q(r(hbar))-hbar over batch and64features. Refiner encoder and decoder train together, but originalCNN is not updated. Current implementation only invokes this refinement forNSV; BT/InfoNCE use projectors. Refiner outputs are not guaranteed physical coordinates or a learned variable count. AdamW weight_decay1e-5 in stage1 is an optimizer setting, not a separate encoder loss; refinement usesAdam with zero default weight decay. No simulation/training changes or reruns.
+
+miao
+
+
+## Session 77 — nb33 RMM-from-reconstruction outputs recovered; explanation and metric audit (2026-11-04)
+
+User supplied the R1–R3 RMM-plane scatter and phase/amplitude bars, asking what is reconstructed, from what, and whether the intended output is an RMM-like index. Re-read current nb33 code and inspected the supplied plots. Searched local Downloads and found the original result folder and July archive, correcting the previous “results not found” status.
+
+**Material Passport:** academic-research-suite / experiment-agent, validate interpretation; Verification Status ANALYZED. Scientific models/readouts were not rerun. A separate deterministic synthetic angle example checked a metric limitation only. No notebook changes.
+
+**Historical evidence recovered:** `/Users/haojiayi/Downloads/latent_content/` includes `rmm_from_reconstruction.csv`, `rmm_from_reconstruction.png`, and `rmm_recon_rings.png`. All three files are byte-identical to members of `/Users/haojiayi/Downloads/latent_content-20260715T011957Z-1-001.zip`. ZIP member dates are July 14 and archive naming July 15, supporting that the outputs were already produced/archived in mid-July; exact execution time and code/checkpoint provenance cannot be inferred solely from file dates. The earlier no-results-found entry records a search limitation, not the experiment's actual completion status.
+
+SHA256: CSV aa13ea6d51a3ed49c94f30207acd92f607b73cffbb09c692dddef860308ec2c1; bars 70228d7d572e4f1f169417ac6a835317c60a7be94e5ecf3a7ed28fb2a94bd451; scatter d7d61ba41a7ea0209f22daaffaf7e69620c0057c6a2176bdf7908a05068c95a8.
+
+**What the outputs mean:** pretrained representations z (SSL2, aux2/3, BT3/7 or NSV7) are fixed. A new training-year Ridge Arec maps standardized z to the same-day concatenated 540-coordinate longitude profiles [u850,u200,OLR]. R1 fits a separate Ridge P from true bandpassed profiles to saved own-RMM1/2, and freezes P. R2 evaluates P(Arec(z)) against own-RMM on active held-out-year days. The scatter axes are reconstructed RMM1/RMM2, not original latent axes or PCA of the latent. It does not reconstruct z itself, retrain the encoder, rerun EOFs on reconstructed data, or demonstrate an independently discovered new operational index. Its purpose is to test whether existing representations preserve the reference index's field information. Linear field reconstruction plus linear P is a composite linear readout of z.
+
+Left scatter: reference own-RMM, colored by its true eight angular octants. Middle/right: reconstructed RMM coordinates, using the same true-phase color convention. Each point is a day; there is no event/time trajectory. Gray radius-one circle is an amplitude reference. NSV supports nontrivial phase organization but has radial/pointwise error; BT3's near-origin reconstructed points show poor signed-field/index reconstruction through this readout, not proof that the original BT latent is constant. Left reference and NSV can use different date coverage.
+
+**Recovered CSV (unchanged):**
+
+| latent | JS circular corr | exact octant accuracy | within +/-1 octant | amplitude R2 | 2-coordinate RMM R2 |
+|---|---:|---:|---:|---:|---:|
+| SSL-nb15 | -0.640 | .212 | .624 | -3.399 | .244 |
+| aux2d | -0.648 | .209 | .649 | -3.034 | .273 |
+| aux2d_rebal | -0.649 | .235 | .647 | -3.337 | .254 |
+| aux3d | -0.357 | .304 | .757 | -2.301 | .381 |
+| NSV-7D | -0.697 | .464 | .888 | -.800 | .610 |
+| Barlow-D3 | .007 | .106 | .323 | -8.461 | -.015 |
+| Barlow-D7 | -.013 | .109 | .345 | -8.385 | -.017 |
+
+Uniform references are .125 exact octant and .375 within one octant. These are point estimates from the archived validation comparison, without new uncertainty estimates or fully matched capacity/date coverage.
+
+**Plot and metric limitations confirmed in source:** R3 clamps the circular-correlation y axis to [-.1,>=1], hiding most negative bars. It chooses scatter examples by argmax/argmin of that metric, yielding BT3 as “best” and NSV7 as “worst,” although exact-octant/within-one and vector-R2 favor NSV strongly. Thus panel selection is not a defensible overall performance ranking. The supplied bars print true-field P reference phase correlation .833 and amplitude R2 -.181. This “CEILING” is a reference readout, not a strict theoretical upper bound; its negative amplitude score means the field-to-index reference pipeline itself does not recover absolute reference amplitude well. Differences in filtering, target normalization/calibration and regression averaging are candidate issues to inspect, not proven causes from these files alone.
+
+nb33 uses the mean-direction-centered Jammalamadaka/Sarma-style sine correlation. When circular marginals have weak mean directions, this statistic can give a misleading sign despite small pointwise angular errors. Verified with a stdlib-only synthetic example: u is a uniform 10,000-point full circle, a=u+.08 sin(u), b=u-.08 sin(u); the exact nb33 formula gives corr=-.996793 while angular MAE=5.8361 degrees and mean cos(error)=.993610. Both mean resultant lengths=.039968 and mean directions differ by180deg. This demonstrates the metric failure mode; the actual real-data cause remains unverified without per-day angles/predictions. Primary source checked: pycircstat2 documentation explicitly lists the JS formula and a strict-mode check for mean-direction significance: https://circstat.github.io/pycircstat2/reference/correlation/ . Do not interpret the negative real-data coefficient as proof of reversed physical propagation or complete absence of phase.
+
+Amplitude R2<0 means worse squared error than the evaluation-target mean reference; amplitudes themselves remain nonnegative. NSV's positive vector R2 and negative radius R2 measure different aspects and are compatible with a useful angular pattern but poor absolute radii. BT's weak direct amplitude readout in nb34 and poor field-derived amplitude here are also compatible: amplitude without phase cannot recover signed oscillatory fields, and taking the norm after averaging/regression can severely attenuate radius. Present the latter as an explanatory possibility, not proof of a unique training failure.
+
+**What the experiment supports:** through the tested fixed linear reconstruction/readout, NSV retains substantially more own-RMM coordinate/sector information than BT; contrastive variants are intermediate. Absolute amplitude recovery is poor, including the true-field reference. It does not validate the circular-correlation ranking, an operational replacement index, universal absence of information, or a complete dynamical state. A defensible follow-up would retain full y ranges, report angular MAE/mean cos(error), index vector scores and radial calibration, inspect mean resultant lengths, save date-matched per-day predictions, and compare a direct latent->own-RMM probe. No such experiment edits or real-data recomputation performed in this explanation turn.
+
+Statistical-fallacy coverage: 11/11 applicability checks. Simpson: no claimed universal subgroup ordering; ecological: day scores not independent ENSO events; Berkson/collider: active-day and coverage conditioning limit interpretation; base rates: exact/within-one references distinguished; regression-to-mean: no claim that a selected best plot will generalize; survivorship: archived completed outputs only, no completeness assumption; look-elsewhere/forking paths: exploratory multi-model metrics, no corrected significance asserted; causation/reverse causality: current-field/index recovery is distinguished from future propagation or mechanism identification. No raw reconstruction/probe reproducibility claim.
+
+miao
+
+
+## Read-only audit — MJO/BSISO representation dimensions versus plotting (2026-11-04)
+
+User asked to check how MJO and BSISO reduced dimension, recalled t-SNE plots, and explicitly prohibited code changes. Read notebook source cells across the climate pipelines, including relevant stored outputs. No notebooks or Python implementation files edited or executed. The prior encoder+h64+MLPprojector description applied to the pendulum implementation and is not a universal description of the earlier climate InfoNCE models.
+
+Findings by pipeline:
+- Early BSISO nb04 CNN uses global pooled128features→Linear128to64→L2normalization; InfoNCE acts on the64D encoder output without a separate nonlinear projector. nb05 Cell5 uses TSNE(n_components=2,perplexity30,n_iter1000,random_state42).fit_transform(embeddings) for plots. Phase probes and ENSO centroid displacement use original64D embeddings, not t-SNE coordinates.
+- BSISO temporalSSL nb08 and MJO temporalSSL nb15/15b output2D directly: convolution→global average pooling32→Linear32to2, no separate h64→MLPprojector, noL2normalization. Loss is one-direction raw-dot-product cross-entropy withtemperature.5, unlike pendulum symmetric cosine InfoNCEtemperature.1. Standard plots directly scatter saved z1/z2, without t-SNE orPCA; ±3day temporal pairing is also distinct. The finalLinear is a learned dimensional map inside theencoder, so saying “no separate projector” does not mean no learned reduction.
+- MJO Barlow nb26/27 does have separate encoder64+projector64→128→64→D withBatchNorm/ReLU. nb26 currentPROJ_DIM3, nb27D7; legacy z7 and embeddings_z7.npy names can refer toD3 in nb26, so actualconfig/shape is authoritative. Encoder/projector train together, optionally/default warm-started fromNSVstage1 whencheckpointexists, not frozen. nb26Cell9 andnb27Cell2 plot both PCA2 and t-SNE2 of projector outputs, with active-day subsampling up to5000; TSNEperplexity30,initpca,learning_rateauto,random_state0. Event trajectories usePCA2/PCA3. This visualization does not replace the learned projector.
+- BSISO NSV nb18c→19→20 andMJO NSV nb21→22→23: first learn64D predictiveencoder representation, estimateID, then trainSIRENautoencoder64→128→64→32→d_hat→32→64→128→64 on fixedsaved64Dfeatures. D_HAT is loaded from intrinsic_dim.json, derived by max(1,round(LB_mean)); recordedBSISOoutput4, MJOworkflow7. This is estimated representation dimension, not proof of truephysicalvariable count. Climatecode calls64Dfeaturesz andrefinedfeaturesv, corresponding topendulumh andz_d. nb20 plots pairwise originalvcoordinates; nb23 plotsPCAofv plusoriginalcoordinatepairs, nott-SNE. Climate refinerarchitecture/raw-latentMSE/500epochs/lr1e-4+cosinescheduler differs frompendulumrefiner/standardizedhMSE/60epochs/lr1e-3.
+
+Interpretation: the rememberedt-SNE is real in earlyBSISO andMJOBarlow, but notall climateplots usedt-SNE andnotall climateInfoNCE had a separateprojector. Distinguish learnedrepresentationcompression frompost-training displayprojection. t-SNE separately optimizes2Ddisplaycoordinates anddoesnotbackpropagate into the climateencoder/projector; it changes geometry, unlike2Dto2DunwhitenedPCA. The oldt-SNEcells fit on displayedall/subsampleddata, whilependulumplottingPCAfits trainonly. Pendulum currently standardizes several architecturalchoices acrossmethods; it isnotanexactreplicaofeacholdclimatepipeline. No experimentmetrics recomputed andno scientificcomparison claimed.
+
+miao
+
+
+## Climate-pipeline replica implementation — BSISO 2-D adaptation (2026-11-04)
+
+User requested aligning pendulum with the original MJO/BSISO pipelines to validate their strengths, failures, bugs and transfer, superseding the previous read-only audit. In the clarification reply, user explicitly selected BSISO 2-D CNNs as the main spatial reference. No GitHub push was requested in this turn. Earlier common-backbone BT/NSV architectures were not identical to the climate versions; this implementation now ports the relevant reference definitions with documented image adaptations.
+
+Added notebooks/toy_pendulum/l1_climate.py under protocol climate_bsiso_v1. Original climate notebooks, legacy l1_learning.py and simulator l1_data.py are unchanged. Data helper SHA256 remains 6aa1ebbee65e65260fed1a85e9f0ecddc58375967c105d5b6af1618de33e69a2, so dataset173b0c7eaac813d1 can be reused; models must be retrained. Added climate_reference_manifest.json with original source-cell hashes, embedded into rebuilt notebooks40/41. Notebook39 only changes the shared import-cache bootstrap; notebook42 filters the new protocol and displays original coordinates, train-fitted PCA and descriptive test-subset t-SNE separately.
+
+InfoNCE follows BSISO nb08/MJO nb15 temporal objective: BSISO2D conv16/32/32, GAP32, Linear32to2, no separate MLP projector or L2 normalization. Raw one-way dot-product cross-entropy attemperature0.5; random positive offsets +/-1/2/3 frames in same trajectory/split; no nearby-negative masking and no added augmentation. Adam0.001, wd0.0001, batch64, epochs50, cosine minimum1e-5, clip1, final-epoch checkpoint. Saves pre_fc32,z2 plus training norm diagnostics.
+
+NSV follows BSISO18c->19->20: predictive encoder h64 and resize/convolution decoder adapted from three31x51 climate fields to one64x64 image, lag10frames, epochs100,batch64,Adam0.001,wd0.0001,cosine1e-5,bestvalidation. ID uses original pinned scikit-dimension0.3.4 calls on deduplicated train+validation features with explicit5000sample cap; test excluded. Main SIREN dimension is estimated, with fixedd2 additional ablation. Exact64->128->64->32->d->32->64->128->64 sine architecture/initialization, raw unstandardizedh MSE,500epochs,lr1e-4,batch64,wd0,cosine1e-6,bestvalidation; CNN fixed. Added original latent dynamics MLPd->32->64->64->32->d withReLU,300epochs,batch64,lr0.001,wd0.0001,cosine1e-5,bestvalidation. This is a one-step latent transition, not autonomous rollout.
+
+BT follows nb26/27 projector64->128BNReLU->64BNReLU->D, D3and7; uses the BSISO predictive encoder selected by user, warm-started from a matching completed NSV run. Encoder/projector both train. Exact sample-std normalization (B-1) with epsilon outside square root, off-diagonal0.005, sum of lag1..5 losses with exponentialweights1to0.05 then one optimizer update. Epochs100,batch256,Adam0.001,wd0.0001,cosine1e-5,no clipping,lowestTRAINloss checkpoint. Initial/per-epoch fixed-batch correlations and diagonal/offdiagonal metrics saved. Missing/ambiguous warm-start checkpoints error instead of silently cold-starting; parent run/checksum and initial encoder checkpoint recorded. BTsame is an optional disabled-by-default toy control with0.01 augmentation. Main methods add zero view noise, while condition observation noise remains.
+
+ID audit: original nb19/22 calls MLE(K=k).fit(h), but K does not select local neighborhoods with default neighborhood_based=True; fit(...,n_neighbors=k) does. Confirmed against official API https://scikit-dimension.readthedocs.io/en/stable/skdim.id.MLE.html . Port preserves the original call for main dimension selection, and separately records an actual explicit-neighbor sweep plus TwoNN/lPCA and Gaussian/shuffled controls. A flat legacy sweep is not evidence of scale stability. No corrected numerical climate ID or physical dimension has been established; original climate notebooks remain unchanged.
+
+Evaluation keeps raw features for all probes and distinguishes per-run dimensions in all plots. t-SNE is descriptive fit_transform on displayed test samples, not an out-of-sample map or probe input. Whole-trajectory/length-group splits, independent test, grouped uncertainty and simulator-state readouts retained. Native plots leave coordinates unchanged; higher coordinates omitted whenD>2,1D zero-padded. Single-frame velocity nonobservability remains; replication cannot validate climate preprocessing or all generalizability. Integer days become frame offsets atT0/50, an explicit temporal adaptation. Pipeline differences cannot be attributed to loss alone.
+
+Documentation: rewrote toy README, added PIPELINE_PARITY.md (source mapping, losses, defaults, adaptations, ID issue, verification boundary), updated toy_oscillator_validation_plan.md tov5 and corrected its obsolete claim that single-frame legacy results had not run. Both historical result families remain separate.
+
+Validation: all14tests passed (6new climate-parity/display tests +8existing simulator/legacy/evaluation tests), using the already installed trajectron++ environment with tiny CPU fixtures, not formal scientific training. Tests execute original notebook class/function definitions and compare outputs, input/parameter gradients, projector/SIREN initialization and loss gradients; validate sampling, warm-start weights, NSV refinement/dynamics, protocol exclusion, reuse and separateBT3/7 displays. Native/t-SNE plots were visually inspected. Builder --check and git diff --check passed. Local skdim is absent; end-to-end fixtures explicitly use grouped-MLE ablation, so the default pinned skdim execution branch and formalT4runs remain to be exercised inColab. No packages installed locally; no original climate notebook edits, commits or push.
+
+miao
+
+
+## Publish climate replica; arrow pipelines and English losses (2026-11-04)
+
+User explicitly requested pushing the changes to GitHub, generating arrow diagrams for InfoNCE/BT/NSV, writing the loss functions in English only, and assessing whether the nonlinear MLP projector materially affects pendulum results.
+
+Added notebooks/toy_pendulum/PIPELINES_AND_LOSSES.md and linked it from README. Diagrams distinguish shared two-branch InfoNCE/BT, NSV predictive/refinement/dynamics stages, frozen versus trainable modules, feature dimensions and pair offsets. English equations match l1_climate.py: raw one-way InfoNCE attemperature0.5; sample-std temporalBT cross-correlation withlag1..5 exponentialweights andoffdiag0.005; NSV pixel MSE normalized byB*4096, rawh reconstruction byB*64, latent dynamics byB*d. NSV stages optimize separately, not one summed joint objective. PCA/t-SNE are display-only, and Adam weight decay is documented separately.
+
+Interpretation: BT andNSV retain their broad block structure but changed substantially in initialization, heads/refiners, rawh scaling, pairing, training budget and dimension selection. InfoNCE changes multiple factors beyond removing its nonlinear projector. A projector alters z geometry and gradients into theencoder; it can improve upstream representations while its own output is harder to read. Checked primarySimCLRSection4.2 (https://proceedings.mlr.press/v119/chen20j/chen20j.pdf); its ImageNet evidence is not a pendulum guarantee. Legacy single-frameInfoNCE angle ridgeR2 h=.999978,z=.983096,MLPz=.996215; BTsame h=.999069,z=.478910,MLPz=.847874(iterationlimit); BTtemporal h=.999888,z=.999335. These are same-run layer comparisons from one seed, not causal projector-on/off experiments. Proposed, but did not implement orrun, a matchedBSISO-GAP32 linear32to2 versus nonlinearMLP32to128to2 ablation. Missing uniquevelocity cannot be recovered from a position-onlysingleframe by adding a projector.
+
+GitHub delivery scope: the climate replica implementation and generatednotebooks, paritymanifest/tests/docs, experimentplan/log updates, and previously analyzed single-frame L1a reports. Target:origin/main, normal push without force. No raw model/data arrays are included. Existing14tests passed in the prior implementation turn; current changes are documentation only, and builder--check plusgitdiff--check passed again. FormalColab training anddefaultskdim execution remain outstanding; originalclimatenotebooks andsimulationdata helper remainunchanged.
+
+miao

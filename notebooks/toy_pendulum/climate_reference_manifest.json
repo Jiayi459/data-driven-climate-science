@@ -1,0 +1,40 @@
+{
+  "protocol": "climate_bsiso_v1",
+  "cell_indexing": "zero-based JSON cell indices",
+  "source_cell_sha256": {
+    "extension_2d/08_ssl_temporal_2d.ipynb": {
+      "2": "204e7e941c792bc1942374088d62920fa167fc0fb21f930811b319ace7aed63a",
+      "10": "4afec46023d6e5c891203d0fd612f08f6acb629262cf411695459bc8899a215c",
+      "12": "4cd9f7beb1bc1ed5382bb1fcaaac2ca08a92d9380a85caae262570819dc19023",
+      "14": "08f606d44d70badff0911028f417f3ba9bef27dd80823dc01a868df60cb8cd57"
+    },
+    "nsv/18c_nsv_bsiso_stage1_lag10.ipynb": {
+      "2": "879dc5b01567dd1708a27d50265407b7c6f69180392d270073e9873c2b6c84cd",
+      "6": "b1f533b3e1a8bbce162f6cc42aa3c005e763073932836f0d15e3bd12ba1d1363",
+      "8": "f85d52c21284f642539d1db7b04135a6d9d245d76fa4e65bef677bbb908cdabf",
+      "10": "268697f0a33cef9b049e2c70b4bf60bc6404f4ba71126d05d31ecc1f3417799f"
+    },
+    "nsv/19_nsv_bsiso_id_estimation.ipynb": {
+      "2": "643a78bcc566fdcc97bc2427541e81258c6143ea3e177e429babea00d4fac714",
+      "4": "98805564a68429e3e2dfc3b9ad81ab710ed264320910eb46e1765bf4b22699c3",
+      "6": "a65771bc95c9bca55d648da260876a1f166d409fabe6124f71882960e8a67995",
+      "12": "5c8180eddac91c0106f98b1ac364c942a306eb89e71dd9cefd5c71c2479f3a5e"
+    },
+    "nsv/20_nsv_bsiso_refine_analysis.ipynb": {
+      "4": "534c9b2503dcd711aa2db34b5bb4ccbbb9e9f265985d68e86b7d65b8d8550fd2",
+      "6": "30f74b9a60ac85a4a150b8f5f9765e478dcc4de26b3dc6a3984ef9bb97c431f0",
+      "16": "55c385f8bb8c2b6dcfcab2b6a475b8c27b3777d1bb2d6d4363907677dd1536af"
+    },
+    "mjo/15_mjo_ssl_temporal_2d.ipynb": {
+      "2": "6e07d3c80e521e5edc713f2a335c3554cf5b9c3daba2ee5cc88f3c3d3c6752a6",
+      "12": "1a5a9d10375fd8ec93881593850977aec4c59c22b0966324775adfc6521a1fa8"
+    },
+    "mjo/26_mjo_barlow_twins.ipynb": {
+      "2": "895ee030c464e27349c67c7206afd169178dbbcb436b844aed35b0e0d161b127",
+      "6": "eb084f42a847b96c1ba9b9250466e60d92fdd4ad75681cdf6d87a546f5dd077f",
+      "8": "735e209a26864212cf10fd1e9d465a66f77f802c0dcc7066f74367a9ef630a42",
+      "10": "7e77178ed1bcd46452a08970be24d260bebbe2d7acd0a5587356dc9bb3b4f27c",
+      "22": "55901df7ccfe6bf718879a787f5a65ba50da600976455df16365ca452a9c75ac"
+    }
+  }
+}

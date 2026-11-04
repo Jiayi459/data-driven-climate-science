@@ -1,178 +1,166 @@
 # L1 — Noisy damped pendulum
 
-This folder continues the project's global notebook numbering after notebook 38.
-All four notebooks are self-contained: upload/open the `.ipynb` in Colab and run its
-cells. They embed their Python helpers, so an unpublished GitHub commit or separate
-module upload is not required. No packages are installed into the local conda environment.
+**Current protocol: `climate_bsiso_v1` (2026-11-04).** Reproduce the project's
+climate representation pipelines on single-frame pendulum images, using **BSISO
+2-D CNNs**, as requested. Each method retains its reference architecture, loss,
+pairing and training recipe. This is a pipeline comparison; differences cannot be
+attributed to the loss alone. For arrow diagrams and English formulas, see
+[PIPELINES_AND_LOSSES.md](PIPELINES_AND_LOSSES.md). See [PIPELINE_PARITY.md](PIPELINE_PARITY.md) for source
+mapping, exact losses, adaptations and the ID-estimation audit issue.
 
-**Protocol update (2026-11-04): one frame is one sample.** Defaults in 40/41/42
-now use `window=1`; temporal pairing/prediction still uses `lag=5`. This matches
-the project's per-time-step climate input convention without concatenating days.
-The October L1a results used `window=5` and remain a separate historical protocol.
-Existing simulator data can be reused, but single-frame models must be trained
-again; old checkpoints/features are not converted by changing the evaluation setting.
+The old common-backbone implementation remains in `l1_learning.py`. Both five-frame
+and single-frame legacy L1a results exist; neither comes from the new replica.
+**Retrain models. Reuse data:** `l1_data.py` is unchanged, and dataset
+`173b0c7eaac813d1` remains compatible.
 
-## Experimental matrix
+## Run in Colab
 
-L1a/b/c are **data conditions**, not different learning methods. Every condition can
-run the same method comparison:
+Each notebook embeds its helpers and can be uploaded directly to Colab. Formal
+training belongs on a T4; no local PyTorch installation is needed.
 
-| Condition | NSV (40) | InfoNCE (41) | BT temporal (41) | BT same-time (41) |
-|---|---|---|---|---|
-| L1a: clean, fixed L | yes | yes | yes | yes |
-| L1b: same states + observation noise | yes | yes | yes | yes |
-| L1c: continuous L across synthetic years | yes | yes | yes | yes |
-
-NSV and Barlow Twins are themselves self-supervised. “SSL” in the notebook filename
-means the project's contrastive InfoNCE method. Start by checking L1a with NSV, then
-run all objectives; use the same protocol for L1b and L1c.
-
-## Run order
-
-| Notebook | Runtime | Function |
+| Notebook | Runtime | Work |
 |---|---|---|
-| [39_pendulum_data.ipynb](39_pendulum_data.ipynb) | CPU | RK4 simulation, immutable dataset, whole-group splits, energy/convergence checks, observation preview, oracle ID |
-| [40_pendulum_nsv.ipynb](40_pendulum_nsv.ipynb) | T4 GPU | Future-window encoder/decoder, train-only ID, SIREN refiners at d=1/2/3/4/8 |
-| [41_pendulum_ssl_barlow.ipynb](41_pendulum_ssl_barlow.ipynb) | T4 GPU | Matched CNNs with InfoNCE, BT-temporal and BT-same-time |
-| [42_pendulum_comparison.ipynb](42_pendulum_comparison.ipynb) | CPU | Train/validation-fitted probes, held-out readouts and direct forecasts, grouped CIs and plots |
+| [39_pendulum_data.ipynb](39_pendulum_data.ipynb) | CPU | Simulate; check integration/energy; save states and whole-group splits |
+| [40_pendulum_nsv.ipynb](40_pendulum_nsv.ipynb) | T4 | Future-frame prediction → ID → SIREN refinement → latent dynamics MLP |
+| [41_pendulum_ssl_barlow.ipynb](41_pendulum_ssl_barlow.ipynb) | T4 | Direct-output InfoNCE; NSV-warm-started temporal BT at D=3 and D=7 |
+| [42_pendulum_comparison.ipynb](42_pendulum_comparison.ipynb) | CPU | Held-out probes/forecasts; native/PCA/t-SNE displays; report ZIP |
 
-1. Run 39. Keep its printed `DATASET_ID`. `PROFILE='smoke'` reduces trajectory count;
-   `PROFILE='pilot'` creates the initial experiment-sized data. A smoke run is only a
-   pipeline check, not scientific evidence.
-2. In 40 and 41, set that ID and `CONDITIONS_TO_RUN=['L1a']`. Blank ID resolves only
-   when exactly one dataset exists; it never silently chooses the latest dataset.
-3. Keep `BASE.window`, `BASE.lag`, `BASE.eval_stride`, `SEEDS`, and other shared
-   hyperparameters matched. Default is one-frame input and five-frame temporal lag,
-   30 stage-1 epochs, 60 NSV refinement epochs, and seed 42.
-4. Run 42 with the same ID/history/stride. It lists missing methods and saves all
-   compatible completed runs separately. Use `SELECTED_RUN_IDS` for a prespecified subset.
-5. Repeat for `L1b_s002` / `L1b_s005`; then `L1c_visible` / `L1c_hidden`. Treat
-   projector dimensions as a sweep, not a prescribed physical-variable count.
-   Expand seeds only after the pilot works.
+1. Reuse the existing dataset ID, or run 39 (`PROFILE='pilot'`; `smoke` checks code only).
+2. In 40/41 set `DATASET_ID`, `CONDITIONS_TO_RUN=['L1a']`, `SEEDS=[42]`.
+   Blank ID works only with exactly one dataset. Run **40 before BT in 41**.
+   Notebook 40 installs `scikit-dimension==0.3.4` into Colab only.
+3. Retain method-specific defaults below for the replica; changes are ablations.
+   BT requires one completed compatible NSV run for the same condition and seed.
+   If several exist, set the exact directory name in `NSV_RUN_IDS` in 41.
+   Missing/ambiguous warm starts raise an error; parent run/checksum are recorded.
+4. Run 42 with the same dataset, window1, stride4 and protocol. It excludes legacy
+   runs, reports missing methods, and retains each configuration/seed separately.
+   `SELECTED_RUN_IDS` selects a prespecified subset, not a best-test run.
+5. Download reports in 42 Cell6. Repeat for L1b/L1c and more seeds after L1a.
+   No new climate-replica scientific training results have been produced locally.
 
-## Data and views
+## Method defaults
 
-- Unit-mass pendulum: `theta_dot=v`, `v_dot=-gamma*v-g/L*sin(theta)`.
-  Defaults: g=L0=1, gamma=0.02, 8 reference periods, 50 observations/period,
-  8 RK4 substeps/observation. Step-halving and energy decay are checked before saving.
-- Fixed-L data: 100 trajectories with independent angle/velocity initial conditions.
-  L1a and every L1b noise condition use exactly the same states and splits.
-- Variable-L data: 60 continuous length draws in [0.8,1.2], five independent
-  trajectories per length. Each synthetic year/length group remains in one split.
-  Length is constant within each trajectory; trajectories are not joined across years.
-- Conditions: L1a sigma_obs=0; L1b sigma_obs=0.02/0.05; both L1c conditions sigma_obs=0.02.
-  Visible L changes the rendered rod length; hidden L uses a fixed display length and
-  only changes the dynamics. No year IDs/text labels or state values enter training.
-- 64×64 grayscale images; no per-frame standardization, cropping, amplitude scaling,
-  clipping of noisy arrays, or time shuffling. Quantized clean images form a reusable
-  local cache; observed noise is added as float32.
-- The default encoder sees `[batch,1,64,64]`, with no history concatenation or
-  numerical velocity channel. Temporal InfoNCE/BT pairs are `(I_t,I_{t+5})`,
-  NSV predicts `I_{t+5}` from `I_t`, and BT-same uses two views of `I_t`.
-  Five frames are 0.1 reference period, not five calendar days. With window=1,
-  the existing InfoNCE nearby-negative rule excludes same-trajectory anchor
-  separations < window+lag = 6 frames; the previous window=5 rule used <10.
-- Observation noise is keyed by trajectory/frame/view. Overlapping windows have
-  consistent pixels within a view; all methods see the same seeded observations.
-- A separate **training augmentation** `view_noise_std=0.01` is applied to input
-  branches even in L1a. It is independent of the condition's observation noise and
-  saved in each run's config. Evaluation uses condition noise only. Set to zero for
-  an explicit no-augmentation experiment; BT-same then has identical L1a views.
-- NSV predicts noisy future observations, not privileged clean truth. BT-same uses
-  independent observation views of the same window; this is a synthetic two-view
-  protocol, documented separately from temporal views.
+| | InfoNCE | Barlow temporal | NSV |
+|---|---|---|---|
+| Input per branch | One `[1,64,64]` image | One `[1,64,64]` image | One `[1,64,64]` image |
+| Representation | BSISO temporal CNN → **z2** directly; no MLP projector | Predictive CNN → h64 → **64→128→64→D** projector; D=3,7 | Predictive CNN → h64; fixed h64 → **SIREN → z_d** |
+| Pair/target | Random ±1/2/3 frames in same trajectory | Lags1–5; exponential weights1→0.05 | Image t+10; refined-state dynamics also t→t+10 |
+| Objective | Raw dot product, one-way InfoNCE, temperature0.5 | Original sample-std cross-correlation; off-diagonal weight0.005; sum lag losses before one update | Future-image MSE; raw h64 reconstruction MSE; latent transition MSE |
+| Initialization | Random | NSV encoder warm start; encoder + projector both trained | Random stage1; separate SIREN/dynamics fits |
+| Stage1 epochs / batch | 50 / 64 | 100 / 256 | 100 / 64 |
+| Optimizer | Adam lr0.001, weight decay0.0001 | Same | Same |
+| Schedule / clipping | Cosine to1e-5 / norm1 | Cosine to1e-5 / none | Cosine to1e-5 / none |
+| Selected checkpoint | Final epoch | Minimum **training** objective | Minimum validation MSE |
+| Added view augmentation | None | None | None |
 
-## Evaluation and interpretation
+NSV refinement: 500 epochs, batch64, Adam lr1e-4, weight decay0, cosine minimum1e-6,
+minimum validation MSE. Main bottleneck d is estimated, **not fixed at2**; a fixed
+d=2 refiner is an additional comparison when different. Dynamics MLP: 300 epochs,
+batch64, Adam lr1e-3, weight decay1e-4, cosine minimum1e-5, minimum validation MSE.
 
-- Optimize representation losses without theta, v or L labels. Physical labels are
-  used for simulator checks and post-training probes only.
-- One common evaluation index includes all required future horizons. Checksum and
-  exact row matching prevent mixing cached features or mismatched observation conditions.
-- Shared backbone output h is 64-D. Compare projector/NSV outputs at matched dimensions;
-  InfoNCE additionally saves its unit-normalized projector features, which discard norm.
-- PCA uses 16×16 block-averaged observed delay windows and fits on training data only.
-  Ridge scalers fit train; ridge alpha uses validation. The optional fixed-width MLP
-  readout fits train with no random temporal validation split.
-- Report theta/v readouts (plus L in L1c), direct ridge forecasts at approximately
-  T0/4, T0 and 2T0, and train-only kNN ID estimates excluding same-group neighbors.
-  Current-state nonlinear readouts diagnose nonlinear coordinate changes; the main
-  forecasts remain linear readouts and **are not autonomous rollouts**.
-- The persistence baseline is explicitly **oracle-state persistence**: it gets the
-  true current theta/v. Do not describe it as an unlabeled image baseline.
-- Bootstrap over independent trajectories (L1a/b) or length groups (L1c). These CIs
-  condition on one trained model; model-seed variation is not included. Run seeds and
-  configurations remain separate in the CSV; no “best test seed” is selected.
-- Figures display the first available run and low-dimensional feature per method in
-  deterministic order. They do not display every dimension/seed; consult the complete CSV.
-- Fixed L has a two-variable physical state. A continuously sampled, constant-per-run
-  L supports a three-variable augmented-state reference if observable. Noisy image-cloud
-  ID need not equal 2/3, and a few discrete lengths do not establish a 3-D local manifold.
-- **Single-frame observability:** the renderer uses theta and visible length only.
-  At fixed L, the same theta produces the same clean image for different velocities;
-  a deterministic encoder cannot uniquely recover velocity or the full physical
-  state from it. Clean snapshot geometry is locally one-dimensional (theta), or
-  two-dimensional (theta,L) when continuous L is visibly rendered. Hidden L is
-  absent from a single snapshot. Velocity/future readouts remain useful diagnostics
-  of this missing information, not mandatory ID=2/3/full-state recovery gates.
-  Independent image noise, quantization and finite sampling affect ID estimates.
-  A single-day multivariable climate field need not have the same observability
-  limit as this position-only pendulum image.
+`bt_same` is an optional toy control (`RUN_SAME_TIME_CONTROL=False`), not a climate
+replica: same-time views with independent pixel augmentation std0.01 and independent
+observation-noise draws. NSV and BT are themselves self-supervised; “SSL” in the
+filename means contrastive InfoNCE.
 
-## Output layout and reruns
+## Data and interpretation
+
+L1a/b/c are data conditions, each usable with all methods:
+
+| Condition | Observation | Independent split unit |
+|---|---|---|
+| L1a | Fixed L, no noise | Trajectory |
+| L1b_s002 / L1b_s005 | Same L1a states, pixel noise std0.02/0.05 | Same trajectory split |
+| L1c_visible | Continuous L, visible rod length, noise std0.02 | Length group |
+| L1c_hidden | L changes dynamics but not displayed rod length, noise std0.02 | Length group |
+
+- Dynamics: `theta_dot=v`, `v_dot=-0.02*v-(g/L)*sin(theta)`, g=L0=1, T0=2π.
+  Eight periods, 50 observation intervals/period, 8 RK4 substeps/interval,
+  401 frames/trajectory. Integration convergence and energy are checked.
+- Pilot: 100 fixed-L trajectories, 60/20/20 split. Variable-L: 60 continuous draws
+  in[0.8,1.2], five trajectories each, whole length groups split60/20/20. L is fixed
+  within each trajectory; synthetic “years” are independent environment groups.
+- Grayscale64×64 images. No stacking, numerical velocity channel, cropping,
+  amplitude rescaling, per-frame standardization or clipping noisy training arrays.
+- One interval=T0/50: NSV10frames=0.2T0, InfoNCE1–3frames=0.02–0.06T0,
+  BT1–5frames=0.02–0.10T0. These are **simulation frames, not calendar days**.
+- Condition noise is fixed per trajectory/frame, shared across temporal branches
+  and evaluation. Training augmentation is separate and zero in the three main
+  methods. NSV predicts noisy future observations, not privileged clean truth.
+- **Observability:** fixed-L images depend on theta, not v. A deterministic encoder
+  cannot uniquely distinguish opposite velocities at the same position. Clean
+  snapshot geometry is locally1D, or2D in(theta,L) when continuous L is visible.
+  Physical state dimension2/3 is an oracle reference, not a required learned ID.
+  Single-day multivariable climate fields have a different observation mapping.
+
+## Evaluation and saved outputs
+
+Physical labels enter simulator checks and post-training probes, not representation
+losses. Whole trajectories/length groups stay in one split. Scaling, PCA and probes
+fit train; probe hyperparameters use validation. Climate ID uses train+validation
+as in nb19, with independent test excluded; train-only grouped ID is also saved.
+See [the parity audit](PIPELINE_PARITY.md#id-audit) for the original MLE parameter issue.
+
+Readouts use **original features**: InfoNCE `pre_fc`32 and `z`2; BT `h`64 and `z`3/7;
+NSV `h`64, ID-selected `z`, and additional `z_d2` when applicable. Display transforms
+never feed probes:
+
+- `latent_native_test.png`: first two original coordinates; 1D is zero-padded;
+  higher coordinates of D>2 are omitted.
+- `latent_test.png`: PCA fitted on train, applied to test. For2D z this centers and
+  rotates/reflects coordinates without whitening or dimensional reduction.
+- `latent_tsne_test.png`: descriptive t-SNE on the displayed test subset, up to1000
+  points. It is not an out-of-sample mapping or physical phase portrait.
+- Each run has a separate panel labelled with dimension/run suffix. Native/t-SNE
+  coordinates are saved. Colors: theta(rad), v(rad/simulation-time unit); latent
+  axes have no physical unit.
+
+PCA baseline fits train on block-averaged observed images. Its legacy `delay_pca`
+name does not imply history when window1. Oracle-state persistence receives true
+current theta/v. Grouped bootstrap CIs condition on a trained model; seed variability
+stays separate. Direct ridge forecasts at ~T0/4,T0,2T0 and NSV's one-step latent MLP
+are **not autonomous rollouts**.
 
 ```text
 MyDrive/BSISO_SSL_Project/toy/pendulum/
-  datasets/<dataset_id>/
-    manifest.json, fixed.npz, variable.npz, oracle_*.png/json
-  runs/<dataset_id>/<condition>/<method>_s<seed>_<config_hash>/
-    run.json, model_best.pt, training_history.json
-    id_train.json, features.npz, complete.json
-    refiner_d*.pt, refine_history_d*.json                  # NSV only
+  datasets/<dataset_id>/manifest.json, fixed.npz, variable.npz, oracle_*
+  runs/<dataset_id>/<condition>/<method>_s<seed>_<hash>/
+    run.json, training_history.json, checkpoint_selection.json
+    encoder_initial.pt, encoder_selected.pt, model_final.pt, model_selected.pt
+    features.npz, id_train.json, complete.json
+    intrinsic_dim.json, dense_features.npz, refinement_summary.json  # NSV
+    refine_d*.pt, refine_d*_history.json, dynamics*                   # NSV
+    bt_corr_history.npz                                             # BT
   analysis/<dataset_id>/<condition>/<evaluation_hash>/
     evaluation.json, scorecard.csv, probe_selection.json, id_train.json
-    evaluation_truth.npz, latent_test.png, forecast_test.png, state_readout_test.png
+    evaluation_truth.npz, display_protocol.json, latent_*.png
+    latent_*_coordinates.npz, state_readout_test.png, forecast_test.png
 ```
 
-Full image arrays live only in `/content/ddcs_l1_frames`, not Drive. One default
-fixed-L cache is about 164 MB; one variable-L rendering cache about 493 MB (uint8).
-Local Colab caches may be deleted/regenerated without deleting saved states/results.
+Uint8 frame caches stay in Colab `/content/ddcs_l1_frames` (~164MB fixed-L,
+~493MB per variable-L rendering). ZIP includes JSON/CSV/PNG, not arrays/checkpoints.
+Source/config/protocol/parent-checkpoint/reference-cell hashes identify runs.
+Completed runs reuse exact identities/checksums. Partial runs are not overwritten;
+inspect them or change `RUN_TAG`. Automatic epoch-level resume is not implemented.
 
-Notebook 42 Cell 6 downloads a ZIP containing the evaluated runs' JSON/CSV reports
-and PNG figures for sharing results. It excludes raw arrays and model checkpoints.
+## Development checks
 
-Dataset identity includes simulation settings and data-code hash. Runs additionally
-include condition, seed, learning settings and training-code hash. Completed artifacts
-are reused only for the same identity; incomplete data/runs are not overwritten.
-If a runtime stops, inspect the partial run and use a new `run_tag` to restart.
-Automatic epoch-level resume is not implemented. Updating data helper code requires
-regenerating notebooks together and a new dataset ID; stale code fails explicitly.
-
-This implementation covers L1a/b/c. Random force noise (L1d), a continuously changing
-physical pendulum length, autonomous latent rollouts, and L2/L3 remain future work.
-No real scientific training results are included in these notebooks.
-
-## Maintaining and validating the notebooks
-
-The `.py` files are the editable source of truth. `build_notebooks.py` embeds them
-verbatim into the notebooks; do not edit an embedded helper independently.
+Edit Python sources and rebuild embedded copies:
 
 ```bash
 python notebooks/toy_pendulum/build_notebooks.py
 python notebooks/toy_pendulum/build_notebooks.py --check
-python -m unittest discover -s notebooks/toy_pendulum -p 'test_l1.py' -v
+python -m unittest discover -s notebooks/toy_pendulum -p 'test_*.py' -v
 ```
 
-Local checks use only an already available scientific environment; do not install
-PyTorch into climate-sci. Torch tests skip if it is absent/unusable. Tiny one-epoch
-fixtures, when supported, validate code paths and do not constitute project training.
-Full GPU experiments belong on Colab.
+`test_climate_parity.py` extracts original notebook definitions and checks
+outputs/gradients after documented image adaptations, losses, initialization,
+pair sampling, warm-start lineage, refinement/dynamics, protocol isolation and plots.
+`test_l1.py` retains simulator/legacy/evaluation regression tests. Tiny CPU fixtures
+check code, not scientific performance. The pinned scikit-dimension branch requires
+Colab; local fixtures explicitly use grouped-MLE because that dependency is absent.
 
-Validation on 2026-10-27: all eight tests passed, including the analytic small-angle
-reference, integration/energy checks, group/noise/cache integrity, held-out-label
-isolation for linear and nonlinear probes, notebook/schema/source validation,
-loss/gradient checks, and tiny one-epoch runs of all four objectives through evaluation.
-The noisy hidden-length branch and generated plot layouts were also checked. These
-are correctness checks. The October five-frame L1a pilot is analyzed in
-`results/toy_pendulum/173b0c7eaac813d1/analysis.md`; single-frame Colab runs and
-L1b/L1c learning results remain pending. The pipeline test now covers window=1,
-while encoder shape/gradient checks retain an explicit history configuration.
+Historical analysis: [five-frame L1a](../../results/toy_pendulum/173b0c7eaac813d1/analysis.md)
+and [single-frame legacy L1a](../../results/toy_pendulum/173b0c7eaac813d1/single_frame/45eeb9463f6b0f10/analysis.md).
+L1b/L1c learning, process noiseL1d, autonomous rollouts and L2/L3 remain future work.

@@ -5,8 +5,8 @@
 - Origin Skill: academic-research-suite / experiment-agent
 - Origin Mode: plan
 - Origin Date: 2026-10-27
-- Verification Status: PARTIALLY ANALYZED — 五帧历史的 L1a pilot 已运行并分析；2026-11-04 按用户要求改为单帧主协议，尚未重新训练。L1b/L1c 学习实验及 L2/L3 仍待运行。
-- Version Label: toy_oscillator_plan_v4_single_frame
+- Verification Status: PARTIALLY ANALYZED — 五帧及单帧旧版 L1a 已运行并分析。2026-11-04 新增 climate_bsiso_v1 复刻协议，14 项本地软件测试通过，正式 Colab 训练待运行。L1b/L1c 学习实验及 L2/L3 仍待运行。
+- Version Label: toy_oscillator_plan_v5_climate_replica
 - 范围：实验设计及 L1 实现对应关系；区分已有观察、数学推导和待检验假设。参数及样本量是 pilot 起点。
 
 ## 推荐与研究目标
@@ -79,20 +79,22 @@ I_t=\operatorname{Render}(\theta_t,L)+\sigma_{\rm obs}\epsilon_t.
 
 ### L1 的方法与评价
 
-先检查 simulator/oracle，再运行 NSV；NSV 基础流程可用后，在完全相同的数据和输入窗上加入 InfoNCE、BT-temporal、BT-same-time。首轮全部随机初始化，以 PCA/delay-PCA、persistence 和线性动力学为基线。
+**当前主线改为复刻既有气候 pipeline，而非只隔离 loss 的影响。** 用户选择 BSISO 二维 CNN 作为图像适配基准。先运行 NSV，再运行 InfoNCE 和使用 NSV warm start 的 BT；BT-same-time 为可选对照。各方法共用数据划分、单帧输入与评价行，但保留原方法不同的架构、训练预算和 checkpoint 选择规则。因此方法差异不能全部归因于 loss。此前共同 backbone、全部随机初始化的实现保留为历史/消融协议。
 
-**L1a、L1b、L1c 是数据条件；每个条件最终都比较全部方法。** 开发时先跑通 L1a 的 NSV，不表示 L1a 只做 NSV 或 L1b 才能做 SSL。当前实现中 40 负责 NSV，41 负责 InfoNCE 和两个 BT 版本，42 在每个数据条件内统一评价。
+**L1a、L1b、L1c 是数据条件；每个条件可比较全部方法。** 40 负责 NSV，41 默认 InfoNCE 与 BT-temporal D=3/7，BT-same-time 默认关闭，42 在每个条件内统一评价。40 必须先完成，供 BT 加载对应 condition/seed 的 encoder；有多个候选时明确指定 run，不能静默选最新模型。
 
-实现说明：输入统一为 1 帧，temporal lag 仍为 5 帧（0.1T0），两者独立设置。L1a 数据观测噪声为零，但全部方法默认有独立记录的 `view_noise_std=0.01` 训练增强，可显式关闭。NSV 的预测目标是未来观测，不使用干净真值图像作为额外监督。当前 42 的多时距评价是共同的直接 ridge 预测，并提供当前状态的固定容量非线性 probe；它不是自主 latent rollout。persistence 明确标记为使用真实当前状态的 oracle-state baseline。详见 `notebooks/toy_pendulum/README.md`。原数据可复用，40/41 需要用 window=1 重新训练；只修改 42 不能把旧五帧模型变成单帧模型。
+当前 `climate_bsiso_v1`：InfoNCE 直接 CNN→z2，raw dot product、单向 loss、temperature=0.5，随机 ±1/2/3 帧正样本；BT 使用 NSV encoder + 64→128→64→D 的 BN/ReLU projector，对 lag1–5 加权损失求和；NSV 预测 t+10 图像，估计 h64 的 ID，再训练原版 raw-h SIREN 与 latent dynamics MLP。InfoNCE 50 epochs；BT/NSV stage1 各100；NSV refine500、dynamics300。三个主方法额外 view noise 均为0；L1b/L1c 的数据观测噪声仍保留。一个 frame interval=T0/50，整数 lag 与气候天数对应是适配，不是实际时间单位相同。原数据不变可复用，40/41 需重训；42 按 protocol 排除旧 run。完整说明：[README](../notebooks/toy_pendulum/README.md)、[PIPELINE_PARITY](../notebooks/toy_pendulum/PIPELINE_PARITY.md)。
 
-BT-same-time 的两个 view 是同一干净时间窗的独立观测噪声实现；BT-temporal 的两个 view 来自相隔 τ 的时间窗。记录窗口重叠比例，并用不重叠窗口检查重叠带来的容易匹配。扫描 lag 时按固定参考周期 T0 设定，不用隐藏 L 为每个样本选择一个可泄漏其周期的 lag。
+可选 BT-same-time 用同帧独立观测噪声及 std0.01 增强；它不是原气候实验。主实验的 temporal 配对共享每帧固定观测。未来 lag 消融按固定 T0 设置，不用隐藏 L 为每个样本选择可能泄漏周期的 lag。42 仍做共同的直接 ridge 未来状态预测；NSV 另有一步 latent MLP，均不宣称为自主 rollout。persistence 仍是 oracle-state baseline。
+
+**ID 实现审计：** 原 nb19/22 用 `MLE(K=k).fit(h)` 扫描，但默认 neighborhood-based 模式由 `fit(...,n_neighbors=k)` 控制局部邻域。新协议保留原调用用于复刻的 d 选择，另存显式邻域扫描；不能将旧扫描的零方差解释为跨尺度稳健性。[官方 API](https://scikit-dimension.readthedocs.io/en/stable/skdim.id.MLE.html)。ID 用 train+val（原流程），去重后最多5000点，test 不参与；另存 train-only 跨组诊断。该问题尚不构成对历史 ID 数值的已验证修正。正式 skdim 分支需在 Colab 运行，本地 tiny fixture 使用明确标记的 grouped-MLE 消融。
 
 评价包括：
 
 1. 留出轨迹上的 θ、v 解码误差；L1c 加 L 解码和未见长度泛化。线性 probe 与受限非线性 probe 分别报告，不强求 NSV 坐标逐项等于物理量。
 2. 各冻结表示接相同容量的预测器，比较未来 θ、v 或共同的干净观测目标；预测时距使用 T0/4、T0、2T0。另报告 NSV 自带 decoder 的结果，但不将其当作完全匹配容量的横向比较。
 3. 学到的表示是否保留速度方向、振幅衰减和周期对 L 的依赖；小角度周期用 2πsqrt(L/g) 作近似参照，大角度周期直接从模拟真值测量。
-4. ID、重构/预测质量随 bottleneck=1/2/3/4/8 的变化，避免只看一个 ID 数值。特别比较固定 L 与连续变化 L 的情形。
+4. 当前主 refiner 使用 ID-selected d，另保存固定 d=2 对照；后续再扩展 bottleneck=1/2/3/4/8，避免只看一个 ID 数值。特别比较固定 L 与连续变化 L。
 5. 噪声增加时，encoder h 与 projector z 各自丢失了哪些信息。对 BT 偏好慢 L、InfoNCE 偏好摆动相位的说法均作为待检验假设。
 
 **L1 的通过条件**：单帧主协议评估可见角度（及可见 L）的恢复、噪声鲁棒性，并量化速度/未来预测的不可观测性限制。完整状态/运动方向恢复仅适用于具备充分观测信息的历史对照。和相同输入的 PCA/线性基线比较；oracle-state persistence 具有额外真值信息，不作为单帧必须击败的门槛。ID 的变化应能由观测、状态覆盖与噪声解释，不能要求单帧 ID 等于物理状态维数 2/3。
@@ -188,13 +190,13 @@ S1 中非零 displacement 是真实的观测分布差异，并非关联检验的
 | BT-temporal | 同一轨迹 t 与 t+τ 的视图 | temporal invariance 是否偏好慢信息 |
 | BT-same-time | 同一真实状态的独立观测噪声视图 | 相位丢失来自 pairing 还是其他实现选择 |
 
-使用同一 backbone、相同输入历史和匹配的超参数选择预算。首轮随机初始化；项目的 NSV warm-start 留作独立消融，不将预训练收益算给某个损失。标准 Barlow Twins 的输入是同一样本的不同扰动版本；项目 nb26 的跨日配对属于具体的时间视图选择。[Zbontar et al., 2021](https://proceedings.mlr.press/v139/zbontar21a.html)
+这里区分两条路线：**当前优先气候 pipeline 复刻**，保留各自 backbone、NSV warm start、训练预算与选择规则，检验整体流程；**后续 objective 消融**才使用同 backbone、匹配预算、共同初始化，分离 loss 与预训练收益。旧共同 backbone 实现可服务后者，不能与新协议混算。标准 Barlow Twins 的输入是同一样本的不同扰动版本；项目 nb26 的跨日配对属于具体的时间视图选择。[Zbontar et al., 2021](https://proceedings.mlr.press/v139/zbontar21a.html)
 
 - 默认单帧作为一套完整比较；短窗仅作另行标记的历史对照。禁止只给 NSV 额外历史却声称是 objective 的优势，也不通过自动增加历史来绕过单帧主协议的可观测性问题。
-- 首轮扫描 τ/T_fast≈0.025、0.10、0.25；比较历史长度时保持预测时距可比。
-- 同时保存 backbone h 与 projector z。投影头的相位弱，不能自动推出 encoder 也没有相位。
-- 表示维度做小范围扫描；L1 用 1/2/3/4/8 检验欠维与 2→3 的变化，L2/L3 可先用 2/4/8。NSV 的 ID 估计作为单独结果，并用预测/重构验证压缩维度，不能要求所有方法硬压至二维。
-- 第一轮只用不改变目标物理量的弱观测扰动。随机振幅缩放、逐帧标准化、空间平移、时间乱序可能分别抹掉幅度、位置或动力学信息，必须作为明确消融。
+- 复刻先保留各自原 lag；后续扫描 τ/T_fast≈0.025、0.10、0.25，比较历史长度时保持预测时距可比。
+- BT/NSV 保存 h64 与 z；当前 InfoNCE 没有独立 projector，保存 GAP 后 pre_fc32 与直接输出 z2。下游表示弱不能自动推出上游也缺少信息。
+- 复刻维度：InfoNCE2、BT3/7、NSV估计d+固定2对照；1/2/3/4/8 等匹配维度扫描为后续消融。ID 是单独结果，不要求全方法压到2D。
+- 主复刻方法无额外训练增强；弱观测扰动保留在数据噪声条件与可选同帧对照。随机幅度缩放、逐帧标准化、空间平移、时间乱序必须明确标记消融。
 - 检查 loss 实际接收的正/负样本身份；不复用已有记录中未经修复的 supervised pair sampler 作为基准。
 
 ### 一个可解析的损失检查
@@ -218,7 +220,7 @@ C(\tau)=\begin{pmatrix}\cos\delta&\sin\delta\\-\sin\delta&\cos\delta\end{pmatrix
 5. 维度：区分完整系统状态维度、采样数据支撑/吸引子维度与连续 Euclidean embedding 维度。固定参数的稳定极限环在几何上是一维环，连续无切口的表示通常使用至少两个实坐标；加入径向瞬态后采样维度才可能扩展。参数变化、噪声与可观测性都会改变 ID 估计。
 6. 现有 displacement：在 S0 校准关联检验；在 S1 测试解释是否被背景误导；在 S3 观察快照距离可能漏检的情况。非线性 encoder 可以将加性背景映射成依相位变化的 latent 位移，因此“去掉共同平移后还有 radial/tangential residual”本身不是物理调制的证明。
 
-按整条独立轨迹划分 train/validation/test，初值、噪声种子及所有派生的配对视图必须留在同一 split。所有 scaling/PCA/probe 只在训练侧拟合；超参数由 validation 决定；最终 test 保持独立。慢时序版本按独立慢事件/模拟 realization 划分，不随机分帧。
+按整条独立轨迹划分 train/validation/test，初值、噪声种子及派生视图留在同一 split。Scaling/PCA/probe 拟合 train，probe 超参数由 validation 决定。气候复刻特例明确保留：InfoNCE final epoch，BT 最低 training loss，NSV 最低 validation loss；ID 使用 train+val。最终 test 不参与这些选择。t-SNE 只拟合展示的 test 子集用于描述，不用于 probe 或选择。慢时序版本按独立事件/realization 划分，不随机分帧。
 
 采用轨迹/realization 层面的 bootstrap，配对比较方法差异；报告训练种子变异与模拟采样不确定性，二者分别列出。Permutation 必须满足所选随机化/交换性条件；有长记忆的慢变量不能仅凭“按年置换”就宣称检验正确。需要真值标签参与的拟合/残差化时，应在适用的 null 流程中重做该步骤。
 
