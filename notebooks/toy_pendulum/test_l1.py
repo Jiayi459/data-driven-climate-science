@@ -96,6 +96,35 @@ class DataTests(unittest.TestCase):
         metrics = metric_rows(y[split == 2], p1[split == 2], ['a', 'b'], np.repeat([1, 2, 3], 4), 50)
         self.assertEqual(metrics[0]['test_groups'], 3)
 
+    def test_inventory_separates_original_models_and_missing_artifacts(self):
+        from l1_evaluation import run_inventory
+        from l1_data import CONDITIONS
+        recipe = {'window': 5, 'eval_stride': 4, 'train_stride': 2, 'view_noise_std': 0.01}
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)/'runs'/'dataset'/'L1a'
+            variants = {
+                'original': ({}, True, True),
+                'single_frame': ({'window': 1}, True, True),
+                'no_augmentation': ({'view_noise_std': 0.0}, True, True),
+                'climate': ({'protocol': 'climate_bsiso_v1'}, True, True),
+                'incomplete': ({}, False, True),
+                'reports_only': ({}, True, False),
+            }
+            for name, (changes, complete, features) in variants.items():
+                path = base/name
+                path.mkdir(parents=True)
+                meta = {'dataset_id': 'dataset', 'condition': 'L1a', 'condition_spec': CONDITIONS['L1a'],
+                        'method': 'infonce', 'training': {**recipe, **changes}, 'learning_source_sha': 'original-sha'}
+                (path/'run.json').write_text(json.dumps(meta))
+                if complete:
+                    (path/'complete.json').write_text('{}')
+                if features:
+                    (path/'features.npz').touch()
+            rows = run_inventory(tmp, 'dataset', 'L1a', recipe, 'original-sha')
+            self.assertEqual([r['run_id'] for r in rows if r['reusable']], ['original'])
+            self.assertTrue(all(r['reason'] for r in rows))
+            self.assertFalse(any(r['reusable'] for r in run_inventory(tmp, 'dataset', 'L1a', recipe, 'other-sha')))
+
     def test_notebooks_valid_and_embedded_code_matches(self):
         import nbformat
         from build_notebooks import build
@@ -128,6 +157,22 @@ class LearningTests(unittest.TestCase):
             raise unittest.SkipTest(f'Existing torch installation is not usable: {exc}')
         torch.set_num_threads(2)
 
+    def test_original_five_frame_run_identities_are_reusable(self):
+        from dataclasses import asdict
+        from l1_data import digest, file_sha
+        import l1_learning
+        archived = HERE.parents[1]/'results/toy_pendulum/173b0c7eaac813d1/received/runs/173b0c7eaac813d1/L1a'
+        paths = sorted(archived.glob('*/run.json'))
+        self.assertEqual(len(paths), 4)
+        config = json.loads(json.dumps(asdict(l1_learning.TrainConfig())))
+        for path in paths:
+            meta = json.loads(path.read_text())
+            self.assertEqual(config, meta['training'])
+            self.assertEqual(file_sha(l1_learning.__file__), meta['learning_source_sha'])
+            identity = {key: meta[key] for key in ('dataset_id', 'condition', 'condition_spec', 'method',
+                                                   'training', 'data_sha', 'learning_source_sha')}
+            self.assertEqual(f"{meta['method']}_s42_{digest(identity)}", path.parent.name)
+
     def test_loss_correspondence_and_gradients(self):
         import torch
         from l1_learning import barlow_loss, infonce_loss, Representation, TrainConfig
@@ -153,7 +198,7 @@ class LearningTests(unittest.TestCase):
         from l1_learning import TrainConfig, run_training
         cfg = SimulationConfig(n_fixed=10, n_length_groups=5, trajectories_per_length=2,
                                periods=3, frames_per_period=12)
-        train = TrainConfig(window=1, lag=3, train_stride=8, eval_stride=4,
+        train = TrainConfig(window=5, lag=3, train_stride=2, eval_stride=4,
                             hidden_dim=8, batch_size=8, epochs=1, refine_epochs=1,
                             refine_dims=(2, 3), run_tag='unit-test-only')
         with tempfile.TemporaryDirectory(prefix='ddcs_l1_test_') as tmp:
@@ -169,7 +214,7 @@ class LearningTests(unittest.TestCase):
                     if method == 'nsv':
                         self.assertEqual(f['z_d3'].shape[1], 3)
                 self.assertEqual(path, run_training(tmp, dataset_id, 'L1a', cache, train, method, device='cpu'))
-            evaluation = EvalConfig(window=1, stride=4, pca_components=4, pca_fit_samples=40,
+            evaluation = EvalConfig(window=5, stride=4, pca_components=4, pca_fit_samples=40,
                                     bootstrap_repeats=20, nonlinear_probe=True, nonlinear_max_iter=5)
             out, score = compare(tmp, dataset_id, 'L1a', cache, paths, evaluation)
             self.assertEqual(set(score.method), {'nsv', 'infonce', 'bt_temporal', 'bt_same',
@@ -178,7 +223,15 @@ class LearningTests(unittest.TestCase):
             self.assertEqual(set(score.variable), {'theta', 'velocity'})
             self.assertTrue((out/'state_readout_test.png').exists())
             self.assertIn('mlp64', set(score.probe))
-            self.assertEqual(json.loads((out/'evaluation.json').read_text())['input_protocol'], 'single_frame')
+            self.assertEqual(json.loads((out/'evaluation.json').read_text())['input_protocol'], 'frame_history')
+            # The actual saved scatter coordinates must equal model outputs, not rotated PCs.
+            with np.load(out/'latent_coordinates.npz') as plotted:
+                selected = plotted['sample_indices']
+                for path in paths:
+                    feature = 'z_d2' if path.name.startswith('nsv_') else 'z'
+                    with np.load(path/'features.npz') as features:
+                        np.testing.assert_array_equal(plotted[f'{path.name}:{feature}'], features[feature][selected])
+                        np.testing.assert_array_equal(plotted['index'], features['index'][selected])
             cached_out, cached_score = compare(tmp, dataset_id, 'L1a', cache, paths, evaluation)
             self.assertEqual(out, cached_out)
             self.assertEqual(len(score), len(cached_score))

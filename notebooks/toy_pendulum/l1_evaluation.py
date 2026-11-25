@@ -108,6 +108,38 @@ def completed_runs(root, dataset_id, condition):
     return sorted(p.parent for p in base.glob("*/complete.json"))
 
 
+def run_inventory(root, dataset_id, condition, expected_training, learning_source_sha):
+    """Read saved run metadata without importing torch or starting training."""
+    base = Path(root)/"runs"/dataset_id/condition
+    rows = []
+    for path in sorted(base.glob("*/run.json")):
+        meta = json.loads(path.read_text())
+        training = meta["training"]
+        reasons = []
+        if meta.get("dataset_id") != dataset_id or meta.get("condition") != condition:
+            reasons.append("dataset/condition mismatch")
+        if meta.get("condition_spec") != CONDITIONS[condition]:
+            reasons.append("observation condition mismatch")
+        if training.get("protocol", "legacy") != "legacy":
+            reasons.append("different learning protocol")
+        if meta.get("learning_source_sha") != learning_source_sha:
+            reasons.append("different learning source")
+        reasons.extend(f"{key} differs" for key, value in expected_training.items()
+                       if training.get(key) != value)
+        complete = (path.parent/"complete.json").is_file()
+        features = (path.parent/"features.npz").is_file()
+        if not complete:
+            reasons.append("incomplete run")
+        if not features:
+            reasons.append("features.npz missing")
+        rows.append({"run_id": path.parent.name, "method": meta["method"],
+                     "window": training.get("window"), "seed": training.get("seed"),
+                     "view_noise_std": training.get("view_noise_std"),
+                     "complete": complete, "features_saved": features,
+                     "reusable": not reasons, "reason": "; ".join(reasons) or "ready for evaluation"})
+    return rows
+
+
 def compare(root, dataset_id, condition, cache_root, run_paths, cfg=EvalConfig()):
     if cfg.bootstrap_repeats < 1 or cfg.pca_fit_samples < 2 or cfg.tsne_max_samples < 2:
         raise ValueError("Invalid evaluation sample counts.")
@@ -231,6 +263,16 @@ def display_title(label, x, method, feature):
     return f"{method} / {feature} ({x.shape[1]}D)\n{label.split(':')[0][-8:]}"
 
 
+def native_coordinates(x, indices, method):
+    """No learned-feature projection, centering, scaling, or fitted transform."""
+    xy = x[indices, :2]
+    labels = ("z1", "z2") if method != "delay_pca" else ("train-fitted PC1", "train-fitted PC2")
+    if x.shape[1] == 1:
+        xy = np.column_stack((xy[:, 0], np.zeros(len(xy))))
+        labels = (labels[0], "zero padding (1D representation)")
+    return xy, labels
+
+
 def plot_native_and_tsne(out, representations, truth, splits, cfg):
     """Display transforms never enter a probe, ID estimate or model selection."""
     import inspect
@@ -248,13 +290,10 @@ def plot_native_and_tsne(out, representations, truth, splits, cfg):
         saved = {"sample_indices": test}
         for col, (label, x, method, feature) in enumerate(selected):
             if mode == "native":
-                xy = x[test, :2]
-                if xy.shape[1] == 1:
-                    xy = np.column_stack((xy[:, 0], np.zeros(len(xy))))
-                axes_labels = ("coordinate 1", "coordinate 2" if x.shape[1] > 1 else "zero padding (1D representation)")
+                xy, axes_labels = native_coordinates(x, test, method)
             else:
                 params = dict(n_components=2, perplexity=min(30.0, max(1.0, (len(test)-1)/3)),
-                              init="pca" if x.shape[1] >= 2 else "random", learning_rate="auto", random_state=0)
+                              init="random", learning_rate="auto", random_state=0)
                 # scikit-learn renamed n_iter in newer Colab versions.
                 params["max_iter" if "max_iter" in inspect.signature(TSNE).parameters else "n_iter"] = 1000
                 xy = TSNE(**params).fit_transform(x[test])
@@ -275,14 +314,15 @@ def plot_native_and_tsne(out, representations, truth, splits, cfg):
         np.savez_compressed(Path(out)/f"latent_{mode}_coordinates.npz", **saved)
     json_write(Path(out)/"display_protocol.json", {
         "native": "first two untransformed feature coordinates; 1D zero-padded; higher dimensions omitted",
-        "pca": "fit on train features, then transform test; latent_test.png",
+        "latent_test": "original feature coordinates, no extra PCA; all displayed coordinates saved in latent_coordinates.npz",
+        "pca": "delay_pca baseline only; display its existing first two principal components without refitting",
         "tsne": "fit_transform on displayed test subset ONLY; descriptive, not an out-of-sample map" if cfg.tsne else "disabled",
         "used_by_probes": False, "one_view_per": "run, preferring z", "tsne_seed": 0})
 
 
 def plot_results(out, representations, scores, truth, splits, groups, index, current_predictions):
     import matplotlib.pyplot as plt
-    # Each latent display projection is fitted on train, including when showing test.
+    # Display learned z directly; the baseline already contains train-fitted PCs.
     selected = display_representations(representations)
     colors = [(0, "angle"), (1, "angular velocity")]
     if truth[:, 2].std() > 1e-8:
@@ -290,21 +330,20 @@ def plot_results(out, representations, scores, truth, splits, groups, index, cur
     fig, axes = plt.subplots(len(colors), len(selected),
                              figsize=(4*len(selected), 3.5*len(colors)), squeeze=False)
     test_idx = np.flatnonzero(splits == 2)[::3]
+    saved = {"sample_indices": test_idx, "index": index[test_idx]}
     for col, (label, x, method, feature) in enumerate(selected):
-        n = min(2, x.shape[1])
-        pca = PCA(n).fit(x[splits == 0])
-        xy = pca.transform(x[test_idx])
-        if n == 1:
-            xy = np.column_stack((xy, np.zeros(len(xy))))
+        xy, axes_labels = native_coordinates(x, test_idx, method)
+        saved[label] = xy
         for row, (j, name) in enumerate(colors):
             sc = axes[row, col].scatter(xy[:, 0], xy[:, 1], c=truth[test_idx, j], s=5, cmap="coolwarm")
             axes[row, col].set_title(display_title(label, x, method, feature)+f"\ncolored by {name}")
-            axes[row, col].set_xlabel("train-fitted PC1")
-            axes[row, col].set_ylabel("train-fitted PC2")
+            axes[row, col].set_xlabel(axes_labels[0])
+            axes[row, col].set_ylabel(axes_labels[1])
             fig.colorbar(sc, ax=axes[row, col])
     fig.tight_layout()
     fig.savefig(Path(out)/"latent_test.png", dpi=140)
     plt.close(fig)
+    np.savez_compressed(Path(out)/"latent_coordinates.npz", **saved)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     for label, x, method, feature in selected:

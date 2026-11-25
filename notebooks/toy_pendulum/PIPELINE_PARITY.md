@@ -1,5 +1,9 @@
 # Climate-pipeline parity audit
 
+**Retained alternative:** as of2026-11-25, notebooks40/41 use the original five-frame
+`l1_learning.py` again. This audit describes the separate single-frame `l1_climate.py`
+implementation, which is preserved. See [README.md](README.md) for the active protocol.
+
 2026-11-04, protocol `climate_bsiso_v1`. The user selected BSISO 2-D CNNs as the
 spatial reference. This ports representation-learning recipes; images do not
 reproduce climate preprocessing, information content, sample size or results.

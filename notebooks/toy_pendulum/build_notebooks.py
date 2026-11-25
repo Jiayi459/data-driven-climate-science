@@ -99,10 +99,6 @@ def notebooks():
         Every condition is compared with NSV, InfoNCE, BT-temporal and BT-same-time.
         These are data conditions, not successive learning algorithms.
 
-        The default learning input is one frame per sample (updated 2026-11-04).
-        The simulator's two-state oracle is unchanged; a position-only snapshot does
-        not identify angular velocity. Earlier five-frame results are a separate protocol.
-
         $\\dot\\theta=v$, $\\dot v=-\\gamma v-(g/L)\\sin\\theta$.
         All L1a–c trajectories have constant L internally. No force noise or continuous
         physical length change in this implementation. Store small state arrays on Drive;
@@ -198,32 +194,25 @@ def notebooks():
         ''') ,
     ]
     train_intro = md('''
-        ## Protocol shared by notebooks 40 and 41
+        ## Original five-frame protocol shared by notebooks 40 and 41
 
-        **climate_bsiso_v1:** replicate each climate method's architecture/training recipe,
-        using the BSISO 2-D CNN for single-channel 64x64 pendulum images. Methods share
-        the data split, one-frame observation and evaluation rows, but have different
-        backbones/heads/optimizers just as the original pipelines do.
+        **Restored 2026-11-25:** L1a, fixed g=L=1, observation sigma=0;
+        100 trajectories split 60/20/20, training stride2, evaluation stride4.
+        Each input is [I(t-4),...,I(t)] in chronological channel order, shape [5,64,64].
+        Keep dataset173b0c7eaac813d1 and the original run_tag='pilot' to reuse saved runs.
+        Start with notebook42's inventory: existing completed five-frame features need
+        evaluation only, not retraining. Single-frame/climate runs are separate protocols.
 
-        InfoNCE: direct 2-D CNN output, raw single-direction loss, temperature=0.5,
-        positive offsets +/-1..3 frames. BT: NSV-warm-started encoder, nb26 projector,
-        sum of weighted losses at lags 1..5 (weight 1 -> 0.05). NSV: predict t+10,
-        estimate ID, fit the nb20/23 raw-latent SIREN, then the latent dynamics MLP.
-        One frame is T0/50 by default, not one calendar day. NSV lag10 is 0.2T0.
-        The three climate methods add **no training-view noise**. Optional BT-same is
-        a toy-only control with independent std0.01 pixel augmentation.
+        All methods use the same CNN backbone, frame history, trajectory split, initial
+        encoder seed and evaluation rows. Default window = lag = 5: temporal views do not
+        overlap. A separate `view_noise_std=0.01` training augmentation is recorded even
+        for clean L1a; all input branches receive it. To study zero augmentation, set it
+        explicitly to zero (BT-same then has identical views in L1a).
 
-        Model selection follows the reference: InfoNCE final epoch; BT minimum training
-        loss; NSV prediction/refinement minimum validation MSE. Original ID uses train+val
-        features; independent test trajectories never enter ID/model selection.
-        No simulator state labels enter representation training. Climate preprocessing
-        (bandpass/anomalies) and the MJO 1-D spatial encoder are not replicated by images.
-        A clean fixed-L snapshot depends on theta, not velocity. Velocity readout and
-        future prediction measure information missing from this observation; do not
-        require recovery of the full two-state oracle from one position-only frame.
-        For L1c, visible-length snapshots depend on (theta,L), hidden-length ones on theta.
-        Earlier common-backbone runs remain historical controls; notebook42 defaults
-        to this new protocol only. Existing simulator data can be reused; retrain 40/41.
+        Observation noise is deterministic per frame and view, shared across methods;
+        same-time views use independent synthetic observation realizations. NSV targets
+        are future **observations**, not oracle clean frames or physical labels.
+        Stage/model selection uses validation only; test labels are first used in 42.
         A completed run is reused by exact config hash. Incomplete runs are not overwritten;
         inspect them or change `run_tag`. Full rerun/resume of partial epochs is not implemented.
         ''')
@@ -234,13 +223,14 @@ def notebooks():
         import torch
         from dataclasses import replace
         from l1_data import CONDITIONS, load_dataset, frame_cache, observation
-        from l1_climate import PROTOCOL, ClimateConfig, ClimateModel, climate_config, run_training
+        from l1_learning import TrainConfig, Representation, run_training
 
-        DATASET_ID = ''  # paste from notebook 39; blank works only if exactly one dataset exists
+        DATASET_ID = '173b0c7eaac813d1'  # paste from notebook 39; blank works only if exactly one dataset exists
         CONDITIONS_TO_RUN = ['L1a']  # later: L1b_s002, L1b_s005, L1c_visible, L1c_hidden
         SEEDS = [42]  # pilot first; then [42, 43, 44] with the same list in notebook 41
-        # Each method uses its own reference defaults; do not share one BASE optimizer.
-        RUN_TAG = 'climate_replica'
+        BASE = TrainConfig(window=5, lag=5, train_stride=2, eval_stride=4,
+                           epochs=30, refine_epochs=60,
+                           batch_size=128, view_noise_std=0.01, run_tag='pilot')
         DATASET_ID = resolve_dataset_id(DATASET_ID)
         if not torch.cuda.is_available():
             raise RuntimeError('Select Colab Runtime > Change runtime type > T4 GPU for training.')
@@ -255,30 +245,23 @@ def notebooks():
         # Notebook 40 — L1 Pendulum: Neural State Variables
         **Runtime:** Colab T4 GPU. **Prerequisite:** notebook 39.
 
-        Replicate nb18c -> nb19 -> nb20: predict t+10 through the BSISO encoder/decoder,
-        compute the original scikit-dimension ID calls, refine through the estimated d,
-        and fit a latent dynamics MLP. Also fit d=2 as an explicit ablation.
-        No physical labels enter these losses. Do not force an ID estimate to equal
-        2 or 3. A single position-only frame does not identify velocity, so physical
-        state dimension is not the expected clean snapshot dimension. Compare with
-        the project NSV pipeline and with same-dimensional SSL outputs.
+        Predict a future image window through a 64-D encoder; estimate intrinsic dimension
+        on training embeddings only; fit SIREN refiners at d=1/2/3/4/8. No physical labels
+        enter these losses. The sweep is intentional: do not force an ID estimate to equal
+        2 or 3. Compare with the project NSV pipeline and with same-dimensional SSL outputs.
         Full autonomous latent rollouts are not implemented here; notebook 42 evaluates
         common direct forecasts and state readouts.
         ''') , train_intro,
         md('## Cell 1 — Drive and isolated paths'), cell(BOOTSTRAP),
-        md('## Cell 2 — Embedded implementations and reference ID dependency'),
-        cell("%pip install -q scikit-dimension==0.3.4"),
-        module('l1_data.py'), module('l1_climate.py'), module('climate_reference_manifest.json'),
+        md('## Cell 2 — Embedded implementations'), module('l1_data.py'), module('l1_learning.py'),
         md('## Cell 3 — Condition and training configuration'), cell(train_config),
-        md('## Cell 4 — Predictive encoder, train+validation ID, and NSV refinement'),
+        md('## Cell 4 — Predictive encoder, train-only ID, and NSV refinement'),
         cell('''
         RUNS = []
         for condition in CONDITIONS_TO_RUN:
             for seed in SEEDS:
-                config = climate_config('nsv', seed=seed, run_tag=RUN_TAG)
-                # Defaults: 100 prediction epochs, 500 refinement, 300 dynamics.
-                # cfg.id_backend='skdim' reproduces the pinned climate estimator calls.
-                path = run_training(L1_ROOT, DATASET_ID, condition, CACHE_DIR, config)
+                config = replace(BASE, seed=seed, refine_dims=(1, 2, 3, 4, 8))
+                path = run_training(L1_ROOT, DATASET_ID, condition, CACHE_DIR, config, 'nsv')
                 RUNS.append(path)
                 print('Completed:', path)
         ''') ,
@@ -291,19 +274,16 @@ def notebooks():
             diagnostic = json.loads((path / 'id_train.json').read_text())
             display(pd.DataFrame(diagnostic['scales']))
             rows = []
-            print('Climate ID:', json.loads((path / 'intrinsic_dim.json').read_text()))
-            for p in sorted(path.glob('refine_d*_history.json')):
+            for p in sorted(path.glob('refine_history_d*.json')):
                 history = pd.read_json(p)
-                rows.append({'dimension': int(p.stem.split('_d')[-1].split('_')[0]), 'best_val_mse': history.val.min()})
+                rows.append({'dimension': int(p.stem.split('_d')[-1]), 'best_val_mse': history.val.min()})
             display(pd.DataFrame(rows).sort_values('dimension'))
-            if (path / 'dynamics_scores.json').exists():
-                print('Latent dynamics:', json.loads((path / 'dynamics_scores.json').read_text()))
         ''') ,
         md('## Cell 6 — Inspect future-frame prediction on validation only'),
         cell('''
         path = RUNS[0]
         meta = json.loads((path / 'run.json').read_text())
-        config = ClimateConfig(**meta['training'])
+        config = TrainConfig(**meta['training'])
         condition = meta['condition']
         bundle, sim, _ = load_dataset(L1_ROOT, DATASET_ID, CONDITIONS[condition]['kind'])
         frames = frame_cache(bundle, sim, condition, CACHE_DIR, DATASET_ID)
@@ -311,9 +291,9 @@ def notebooks():
         end = config.window + 10
         x = observation(frames, trajectory, end, config.window, CONDITIONS[condition]['noise_std'], sim.seed)
         y = observation(frames, trajectory, end+config.lag, config.window,
-                        CONDITIONS[condition]['noise_std'], sim.seed, draw=0)
-        model = ClimateModel(config).eval()
-        model.load_state_dict(torch.load(path / 'model_selected.pt', map_location='cpu', weights_only=True))
+                        CONDITIONS[condition]['noise_std'], sim.seed, draw=1)
+        model = Representation(config, predictive=True).eval()
+        model.load_state_dict(torch.load(path / 'model_best.pt', map_location='cpu', weights_only=True))
         with torch.no_grad():
             predicted = model(torch.from_numpy(x[None]))[1][0].numpy()
         fig, axes = plt.subplots(3, config.window, figsize=(3*config.window, 8), squeeze=False)
@@ -328,40 +308,33 @@ def notebooks():
     ssl = [
         md('''
         # Notebook 41 — L1 Pendulum: InfoNCE + Barlow Twins
-        **Runtime:** Colab T4 GPU. **Prerequisites:** notebooks 39 and 40 (BT uses the NSV encoder).
+        **Runtime:** Colab T4 GPU. **Prerequisite:** notebook 39; run 40 for the NSV comparison.
 
-        `infonce`: nb08/15 raw single-direction contrastive loss, direct encoder z2.
-        No separate projector, L2 normalization, or nearby-negative masking.<br>
-        `bt_temporal`: nb26 weighted 1..5 lag losses, BN/ReLU projector, D=3 and D=7.
-        Both encoder and projector train; encoder starts from the matching notebook40 run.<br>
-        `bt_same`: optional same-time augmented control; not an old climate experiment.
+        `infonce`: cosine symmetric cross-view contrastive loss on temporal pairs.<br>
+        `bt_temporal`: redundancy reduction on shifted windows.<br>
+        `bt_same`: redundancy reduction on two observations of the same state window.
 
-        InfoNCE saves `pre_fc` (32-D pooled features) and direct encoder `z` (2-D).
-        Barlow saves encoder `h` (64-D) and projector `z` (D-D). Check feature names,
-        not just dimensions, when interpreting readouts. Runs record source-cell hashes.
+        InfoNCE's positive target is always the matched row; overlapping nearby windows
+        from the same trajectory are masked as negatives. Distant recurrence can still
+        create false negatives, which is part of the scientific comparison.
+        Save backbone h and projector z separately; InfoNCE also saves normalized z_unit.
         ''') , train_intro,
         md('## Cell 1 — Drive and isolated paths'), cell(BOOTSTRAP),
-        md('## Cell 2 — Embedded implementations'), module('l1_data.py'), module('l1_climate.py'), module('climate_reference_manifest.json'),
-        md('## Cell 3 — Method-specific training configuration'), cell(train_config),
+        md('## Cell 2 — Embedded implementations'), module('l1_data.py'), module('l1_learning.py'),
+        md('## Cell 3 — Matched training configuration'), cell(train_config),
         cell('''
-        METHODS = ['infonce', 'bt_temporal']
-        BT_PROJECTION_DIMS = [3, 7]  # original MJO Barlow settings
-        RUN_SAME_TIME_CONTROL = False
-        # Only needed if several compatible NSV runs exist for a condition/seed.
-        NSV_RUN_IDS = {}  # e.g. {('L1a', 42): 'nsv_s42_<hash>'}
+        METHODS = ['infonce', 'bt_temporal', 'bt_same']
+        PROJECTION_DIMS = [2]  # add 3/4/8 for a dimension sweep; include 3 for L1c
         ''') ,
-        md('## Cell 4 — Reproduce each method recipe'),
+        md('## Cell 4 — Train each objective from the same encoder initialization'),
         cell('''
         RUNS = []
         for condition in CONDITIONS_TO_RUN:
             for seed in SEEDS:
-                methods = METHODS + (['bt_same'] if RUN_SAME_TIME_CONTROL else [])
-                for method in methods:
-                    dims = [2] if method == 'infonce' else BT_PROJECTION_DIMS
-                    for dim in dims:
-                        config = climate_config(method, seed=seed, projection_dim=dim, run_tag=RUN_TAG)
-                        path = run_training(L1_ROOT, DATASET_ID, condition, CACHE_DIR, config,
-                                            warm_start_run_id=NSV_RUN_IDS.get((condition, seed)))
+                for dim in PROJECTION_DIMS:
+                    for method in METHODS:
+                        config = replace(BASE, seed=seed, projection_dim=dim)
+                        path = run_training(L1_ROOT, DATASET_ID, condition, CACHE_DIR, config, method)
                         RUNS.append(path)
                         print('Completed:', path)
         ''') ,
@@ -375,7 +348,7 @@ def notebooks():
             bundle, _, _ = load_dataset(L1_ROOT, DATASET_ID, CONDITIONS[meta['condition']]['kind'])
             with np.load(path / 'features.npz') as f:
                 train = bundle['splits'][f['index'][:, 0]] == 0
-                for name in [key for key in ['pre_fc', 'h', 'z'] if key in f]:
+                for name in ['h', 'z']:
                     z = f[name][train]
                     print(name, 'std min/median/max:', np.min(z.std(0)), np.median(z.std(0)), np.max(z.std(0)))
             display(pd.DataFrame(json.loads((path / 'id_train.json').read_text())['scales']))
@@ -385,10 +358,13 @@ def notebooks():
     evaluation = [
         md('''
         # Notebook 42 — L1 Pendulum: Unified Held-out Evaluation
-        **Runtime:** Colab CPU (no torch needed). **Prerequisites:** 39, then completed 40/41 runs.
+        **Runtime:** Colab CPU (no torch needed). Existing completed original five-frame
+        runs can be reused directly: start here before rerunning39/40/41.
+        Learned representations are plotted directly as z1/z2, with no PCA or t-SNE.
+        Only the delay-PCA baseline uses PCA; its first two stored PCs are displayed.
 
         Each L1 condition compares all completed compatible runs. Missing methods are reported;
-        they are never silently labelled as evaluated. PCA, scalers and probes fit **train** only;
+        they are never silently labelled as evaluated. Baseline PCA, scalers and probes fit **train** only;
         ridge hyperparameters use **validation** only. Test groups supply final scores and
         grouped bootstrap intervals. Intervals condition on each trained model; seeds stay
         separate. Avoid repeatedly selecting methods/hyperparameters on these test scores.
@@ -405,40 +381,52 @@ def notebooks():
         cell('''
         import pandas as pd
         from IPython.display import display, Image
-        from l1_evaluation import EvalConfig, completed_runs, compare
+        from l1_evaluation import EvalConfig, run_inventory, compare
 
-        DATASET_ID = ''
+        DATASET_ID = '173b0c7eaac813d1'
         CONDITIONS_TO_EVALUATE = ['L1a']
-        EVALUATION = EvalConfig(window=1, stride=4, bootstrap_repeats=300, nonlinear_probe=True,
-                                protocol='climate_bsiso_v1', tsne=True)
-        # Empty mapping uses all completed runs matching history/stride; never chooses "best test".
+        EVALUATION = EvalConfig(window=5, stride=4, bootstrap_repeats=300, nonlinear_probe=True,
+                                protocol='legacy', tsne=False)
+        # Require the original training recipe/source, not just matching feature shapes.
+        EXPECTED_TRAINING = {
+            'seed': 42, 'window': 5, 'lag': 5, 'train_stride': 2, 'eval_stride': 4,
+            'hidden_dim': 64, 'projection_dim': 2, 'batch_size': 128, 'epochs': 30,
+            'refine_epochs': 60, 'refine_dims': [1, 2, 3, 4, 8],
+            'learning_rate': 0.001, 'weight_decay': 1e-5, 'temperature': 0.1,
+            'barlow_offdiag': 0.005, 'view_noise_std': 0.01, 'run_tag': 'pilot'}
+        LEARNING_SOURCE_SHA = '5bb502e0c69d8cfa5ef34c1b0d184204f54649bda979694efa4478c5e7a71127'
+        # Empty mapping uses all compatible saved original runs; never chooses "best test".
         # To compare a prespecified subset, map condition -> list of exact run directory names.
         SELECTED_RUN_IDS = {}
         DATASET_ID = resolve_dataset_id(DATASET_ID)
+        INVENTORY = {}
+        for condition in CONDITIONS_TO_EVALUATE:
+            rows = run_inventory(L1_ROOT, DATASET_ID, condition, EXPECTED_TRAINING, LEARNING_SOURCE_SHA)
+            INVENTORY[condition] = rows
+            print(condition, 'SAVED RUN INVENTORY (read-only; no training)')
+            display(pd.DataFrame(rows))
+            print('Ready for evaluation:', sum(row['reusable'] for row in rows))
+        print('Missing features with model_best.pt/refiner_d*.pt retained can be re-encoded without training.')
+        print('A downloaded report ZIP contains no features/checkpoints; check the original Drive folders.')
         ''') ,
         md('## Cell 4 — Fit probes/baselines and evaluate once on held-out groups'),
         cell('''
         RESULTS = {}
         for condition in CONDITIONS_TO_EVALUATE:
-            paths = completed_runs(L1_ROOT, DATASET_ID, condition)
-            if condition in SELECTED_RUN_IDS:
-                requested = set(SELECTED_RUN_IDS[condition])
-                found = {p.name for p in paths}
-                if not requested <= found:
-                    raise FileNotFoundError(f'Missing requested runs: {requested-found}')
-                paths = [p for p in paths if p.name in requested]
-            compatible, methods = [], set()
-            for path in paths:
-                meta = json.loads((path / 'run.json').read_text())
-                training = meta['training']
-                if (training['window'] == EVALUATION.window and training['eval_stride'] == EVALUATION.stride
-                        and training.get('protocol', 'legacy') == EVALUATION.protocol):
-                    compatible.append(path); methods.add(meta['method'])
-                else:
-                    print('Skipping incompatible history/stride/protocol:', path.name)
-            missing = {'nsv', 'infonce', 'bt_temporal'} - methods
+            # Re-read the inventory in case another Colab session has just finished a run.
+            rows = run_inventory(L1_ROOT, DATASET_ID, condition, EXPECTED_TRAINING, LEARNING_SOURCE_SHA)
+            reusable = {row['run_id']: row for row in rows if row['reusable']}
+            requested = set(SELECTED_RUN_IDS.get(condition, reusable))
+            if not requested <= reusable.keys():
+                raise ValueError(f'Requested runs are missing/incompatible; inspect Cell3: {requested-reusable.keys()}')
+            compatible = [L1_ROOT/'runs'/DATASET_ID/condition/name for name in sorted(requested)]
+            methods = {reusable[name]['method'] for name in requested}
+            missing = {'nsv', 'infonce', 'bt_temporal', 'bt_same'} - methods
             if missing:
-                print('Methods not yet available:', sorted(missing))
+                print('Methods not yet available:', sorted(missing), '| run40 for NSV, run41 for SSL/BT')
+            if not compatible:
+                raise FileNotFoundError('No completed original five-frame features found. Inspect Cell3; '
+                                        'new single-frame runs cannot replace five-frame models.')
             output, scores = compare(L1_ROOT, DATASET_ID, condition, CACHE_DIR, compatible, EVALUATION)
             RESULTS[condition] = (output, scores)
             print(condition, 'outputs:', output)
@@ -450,10 +438,8 @@ def notebooks():
             columns = ['method', 'feature', 'dimension', 'training_seed', 'probe', 'variable',
                        'r2', 'rmse', 'rmse_ci_low', 'rmse_ci_high', 'test_groups']
             display(scores.loc[scores.horizon_frames == 0, columns].reset_index(drop=True))
-            for name in ['latent_native_test.png', 'latent_test.png', 'latent_tsne_test.png',
-                         'state_readout_test.png', 'forecast_test.png']:
-                if (output / name).exists():
-                    display(Image(filename=str(output / name)))
+            for name in ['latent_test.png', 'state_readout_test.png', 'forecast_test.png']:
+                display(Image(filename=str(output / name)))
             print('All configurations and seeds remain separate in:', output / 'scorecard.csv')
         ''') ,
         md('## Cell 6 — Download reports for analysis'),
@@ -497,19 +483,18 @@ def notebooks():
         md('''
         ## Interpretation checklist
 
-        - L1a: assess angle recovery; velocity/future readouts diagnose information missing
-          from a single position-only frame. A closed ring or ID=2 is not required.
+        - L1a: recover velocity direction and decaying motion; a closed ring is not required.
         - L1b: compare the same initial conditions and split with L1a, at matched method settings.
         - L1c: length is continuous, constant per trajectory; compare visible and hidden rendering.
-        - InfoNCE z is the direct encoder output, pre_fc is the pooled32 feature; BT h/z
-          are encoder/projector; NSV z is the ID-selected refiner, z_d* are extra ablations.
-        - Native coordinates, train-fitted PCA and descriptive t-SNE are distinct views.
-          t-SNE is fitted to the displayed test subset only, never used by numerical probes.
-        - Physical state ID ~2/3 is distinct from snapshot geometry: clean fixed-L/hidden-L
-          images depend on theta, visible-L images on (theta,L). Noise/finite sampling
-          can change estimated ID. No velocity channel is added to the single frame.
-        - Figures display each completed run (including both BT dimensions), identified
-          by dimension and run suffix. The CSV retains every representation and probe.
+        - Compare encoder h and projector z; InfoNCE normalized z_unit removes radial information.
+        - ID ~2/3 is a conditional physical reference; noise and sampling can alter estimates.
+        - Figures display each selected run separately, preferring z or NSV z_d2.
+          Learned z coordinates are untransformed; displayed coordinates and trajectory/frame
+          indices are saved in latent_coordinates.npz. Axis units are arbitrary latent units.
+          NSV z_d2 is an explicitly fitted bottleneck, not proof of an estimated ID of2.
+          Delay-PCA uses train-fitted PCA64 and displays its first two existing coordinates.
+        - L1a observation sigma is0; original training view augmentation std0.01 remains
+          separate. No augmentation is used when exporting features for these plots.
         - Initial pilot settings are not evidence that any method works. Report actual held-out
           results and seed variation before making scientific claims.
         ''') ,

@@ -1,7 +1,92 @@
-# Pendulum learning pipelines and loss functions
+# Active five-frame pipelines and losses
+
+Restored 2026-11-25. Notebooks40/41 use the original `l1_learning.py`.
+L1a: g=L=1, damping0.02, observation noise0, trajectory split60/20/20,
+training stride2, evaluation stride4. The original independent training-view
+augmentation std0.01 remains; it is disabled for exported features.
+All learned latent plots use original coordinates, without PCA or t-SNE.
+The formulas below are in English.
+
+Let X_t=[I_(t-4),...,I_t], and Y_t=X_(t+5). The shared CNN outputs h in R^64.
+Each SSL projector is Linear64→128→LayerNorm→SiLU→Linear128→2.
+
+```text
+InfoNCE:
+X_t     → shared encoder → h64 → shared MLP projector → z2 ┐
+X_(t+5) → shared encoder → h64 → shared MLP projector → z2 ┴→ symmetric InfoNCE
+After training: clean X_t → encoder → projector → z2 → scatter(z1,z2)
+
+Barlow Twins:
+X_t → shared encoder → h64 → shared MLP projector → z2 ┐
+Y   → shared encoder → h64 → shared MLP projector → z2 ┴→ Barlow loss
+Y=X_(t+5) for temporal BT; Y=X_t for independently augmented same-time BT.
+After training: clean X_t → encoder → projector → z2 → scatter(z1,z2)
+
+NSV:
+Stage1: X_t → encoder → h64 → image decoder → predicted X_(t+5) → image MSE
+Then: frozen encoder h64 → train-only ID diagnostic
+Stage2: h64 → training-set normalization → refiner encoder → z_d
+        → refiner decoder → reconstructed normalized h64 → latent MSE
+After training: clean X_t → encoder → normalization → refiner encoder → z_d2
+               → scatter(z1,z2)
+```
+
+**InfoNCE loss.** Define q_i^A=z_i^A/||z_i^A|| and q_i^B=z_i^B/||z_i^B||.
+Let s_ij=(q_i^A)^T q_j^B/T, with T=0.1. Retain the matching row i=j;
+mask other rows from the same trajectory whose anchor times differ by fewer
+than window+lag=10 frames. Denote the allowed column/row sets by A_i and B_i.
+
+\[
+\mathcal L_{\mathrm{NCE}}=-\frac{1}{2B}\sum_i
+\left[\log\frac{e^{s_{ii}}}{\sum_{j\in A_i}e^{s_{ij}}}
++\log\frac{e^{s_{ii}}}{\sum_{j\in B_i}e^{s_{ji}}}\right].
+\]
+
+The encoder and projector are optimized jointly. Plotting uses raw z, not q.
+
+**Barlow Twins loss.** Standardize each feature across the batch using population
+variance and epsilon=1e-5. Define C=(tilde Z_A)^T tilde Z_B/B.
+
+\[
+\mathcal L_{\mathrm{BT}}=\sum_k(1-C_{kk})^2
++0.005\sum_{k\ne l}C_{kl}^2.
+\]
+
+The encoder and projector are optimized jointly. Temporal BT uses one lag5 pair,
+not the climate replica's weighted sum over lags1..5.
+
+**NSV prediction loss.** With P=5*64*64 image values per target window,
+
+\[
+\mathcal L_{\mathrm{prediction}}=\frac{1}{BP}\sum_{i,p}
+\left[D(E(X_i))_p-Y_{i,p}\right]^2.
+\]
+
+Only the input receives training-view augmentation. The target remains the future
+observation. The prediction encoder and image decoder are optimized jointly.
+
+**NSV refinement loss.** Normalize frozen h using training-set mean and coordinate
+standard deviations (with the numerical scale floor in `Refiner`). Let this vector
+be tilde h, R_e the refiner encoder, and R_d its decoder.
+
+\[
+\mathcal L_{\mathrm{refinement}}=\frac{1}{64B}\sum_i
+\left\|R_d(R_e(\widetilde h_i))-\widetilde h_i\right\|_2^2.
+\]
+
+The two refiner components are optimized jointly; the original encoder stays
+fixed. Fit d in {1,2,3,4,8}. Plotting z_d2 does not mean an ID estimator selected2.
+This original pipeline has no separately trained latent dynamics MLP.
+
+---
+
+The remaining sections document the separate climate-replica implementation.
+They are not the active notebook40/41 recipe after the five-frame restoration.
+
+# Retained single-frame climate-replica pipelines
 
 Protocol: `climate_bsiso_v1`. Date: 2026-11-04.
-These diagrams describe the current implementation in `l1_climate.py`, not the
+These diagrams describe the retained alternative in `l1_climate.py`, not the active
 historical common-backbone experiments. Each encoder input is one grayscale image,
 shape `[1,64,64]`. Batch size is denoted by B; the number of image pixels is P=4096.
 PCA and t-SNE are post-training display transforms and are absent from all losses.
