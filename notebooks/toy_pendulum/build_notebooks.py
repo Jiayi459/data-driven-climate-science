@@ -53,6 +53,30 @@ def module(name):
     return result
 
 
+def state_plot_cell():
+    """An independent Colab cell, including the plotting code and exact cached path."""
+    source = (HERE/'l1_state_plot.py').read_text()
+    definitions = source.split('\nif __name__ == "__main__":')[0]
+    source_sha = hashlib.sha256(source.encode()).hexdigest()
+    run = textwrap.dedent('''
+        # Standalone: no previous notebook cells, training or probe fitting required.
+        from google.colab import drive
+        from IPython.display import display, Image
+
+        if not Path('/content/drive/MyDrive').is_dir():
+            drive.mount('/content/drive')
+
+        EVALUATION_DIR = (
+            Path('/content/drive/MyDrive/BSISO_SSL_Project/toy/pendulum')
+            / 'analysis' / '173b0c7eaac813d1' / 'L1a' / 'c45df90165111f0f'
+        )
+    ''')
+    run += f"\nfigure_path = plot_state_space(EVALUATION_DIR, source_sha={source_sha!r})\n"
+    run += "display(Image(filename=str(figure_path)))\nprint('Saved:', figure_path)\n"
+    run += "print('Point and color values:', EVALUATION_DIR / 'state_space_by_latent_test.csv')\n"
+    return cell(definitions + '\n' + run)
+
+
 BOOTSTRAP = '''
 from google.colab import drive
 drive.mount('/content/drive')
@@ -67,7 +91,7 @@ L1_ROOT.mkdir(parents=True, exist_ok=True)
 RUNTIME_DIR = Path(tempfile.mkdtemp(prefix='ddcs_l1_code_'))
 os.chdir(RUNTIME_DIR)
 sys.path.insert(0, str(RUNTIME_DIR))
-for name in ('l1_data', 'l1_learning', 'l1_climate', 'l1_evaluation'):
+for name in ('l1_data', 'l1_learning', 'l1_climate', 'l1_evaluation', 'l1_state_plot'):
     sys.modules.pop(name, None)
 CACHE_DIR = Path('/content/ddcs_l1_frames')  # disposable; never store frame arrays on Drive
 
@@ -376,7 +400,7 @@ def notebooks():
         because it receives the true current theta/velocity. Delay-PCA receives observed windows.
         ''') ,
         md('## Cell 1 — Drive and isolated paths'), cell(BOOTSTRAP),
-        md('## Cell 2 — Embedded CPU implementations'), module('l1_data.py'), module('l1_evaluation.py'),
+        md('## Cell 2 — Embedded CPU implementations'), module('l1_data.py'), module('l1_evaluation.py'), module('l1_state_plot.py'),
         md('## Cell 3 — Select dataset and compatible runs'),
         cell('''
         import pandas as pd
@@ -433,15 +457,29 @@ def notebooks():
         ''') ,
         md('## Cell 5 — Readouts, prediction curves and held-out trajectories'),
         cell('''
+        from l1_state_plot import plot_state_space
         for condition, (output, scores) in RESULTS.items():
+            # Uses cached arrays only; identical 500 samples, true last-frame state axes.
+            plot_state_space(output)
             print(condition, 'CURRENT STATE READOUTS')
             columns = ['method', 'feature', 'dimension', 'training_seed', 'probe', 'variable',
                        'r2', 'rmse', 'rmse_ci_low', 'rmse_ci_high', 'test_groups']
             display(scores.loc[scores.horizon_frames == 0, columns].reset_index(drop=True))
-            for name in ['latent_test.png', 'state_readout_test.png', 'forecast_test.png']:
+            for name in ['latent_test.png', 'state_space_by_latent_test.png',
+                         'state_readout_test.png', 'forecast_test.png']:
                 display(Image(filename=str(output / name)))
             print('All configurations and seeds remain separate in:', output / 'scorecard.csv')
         ''') ,
+        md('''
+        ## Cell 5a — True phase space colored by latent coordinates (standalone)
+
+        **Run this cell alone on Colab CPU.** It mounts Drive if necessary and reads
+        the already completed `c45df90165111f0f` evaluation. No earlier notebook cells,
+        training, readout fitting or PCA are needed. The same500 windows are plotted
+        at their final-frame true theta/velocity coordinates: four method columns,
+        row1 colored by raw z1 and row2 by raw z2. The helper code is embedded below.
+        PNG and500-row CSV are saved beside the original evaluation.
+        '''), state_plot_cell(),
         md('## Cell 6 — Download reports for analysis'),
         cell('''
         from pathlib import Path

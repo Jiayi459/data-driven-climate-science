@@ -6960,3 +6960,92 @@ miao
 User explicitly requests pushing the pending changes to GitHub. Scope is the12 modified files: rebuilt pendulum notebooks39–42, builder, legacy training defaults, native-coordinate evaluator and inventory, tests, README/pipeline documentation, and accumulated conversation log updates. The full16-test suite passed during implementation; no learning/evaluation source changed since that validation. Rechecked notebook embedding with build --check and whitespace with git diff --check. Fetched origin and fast-forwarded from3e32b44 to1740a85, retaining the user's separate Colab change to notebooks/mjo/33_mjo_latent_content.ipynb. No overlapping edits or merge conflicts. This commit prepares the requested normal push to origin/main; remote success is checked after the push. No force push, data/model upload or scientific retraining is involved.
 
 miao
+
+
+## Colab inventory confirms original five-frame artifacts are present (2026-11-25)
+
+User provides the notebook42 Cell3 inventory screenshot. The four original runs (bt_same_s42_965cdae7e094e5fb, bt_temporal_s42_11fbe85137e2fe3f, infonce_s42_81eb6af4797e3c95, nsv_s42_4acd97a965814085) each show window5, seed42, view_noise_std.01, complete=True, features_saved=True and reusable=True; Ready for evaluation:4. This is evidence from the user's Colab screenshot, not a direct Drive inspection or checksum verification here. Old single-frame runs and new climate InfoNCE are correctly excluded by compatibility checks. New climate NSV nsv_s42_aa589c3cf6439da8 is incomplete and has no saved features, but is outside this comparison and does not block the four ready models.
+
+Advise continuing notebook42 Cell4 (feature checksum/index validation and CPU probes/baseline/evaluation), Cell5 (raw-z plots and scores), Cell6 (download reports). No39/40/41 rerun or representation retraining is required for the four ready artifacts. Cell4 still fits supervised evaluation probes; that is separate from training encoders/projectors/refiners. The learning-source models are the original five-frame protocol, not the newer climate replica. No code changes or remote operations requested/performed.
+
+miao
+
+
+## Returned native five-frame results (2026-11-25)
+
+Analyzed pendulum_results_173b0c7eaac813d1 (2).zip,36 report files. Archived evaluation reports and analysis at results/toy_pendulum/173b0c7eaac813d1/native_five_frame/c45df90165111f0f/. Run/feature hashes match original five-frame results; max matched R2 difference4.55e-8. Native display confirms PCA removal; encoder h retains state, particularly NSV h angle/velocity linear R2=.999604/.992266, while z_d2 near0. BT/InfoNCE h outperform z readouts. NSV h ID median1.845/1.914/1.963 across k. Single seed; no raw feature recomputation or claim of diagnosed architectural cause. No code edits, training or push.
+
+miao
+
+
+## Pendulum embedding definition and five-frame input shape (2026-11-25)
+
+User asks what the pendulum embedding is, and whether all old inputs are 5x64x64 (IDE selection: notebook 42 Cell 3, EXPECTED_TRAINING window=5). Read-only: read l1_learning.py (WindowDataset, Encoder, Decoder, Representation, losses, encode, Refiner, run_training) and l1_evaluation.py (compare, display_representations, delay_pca). No code changes.
+
+Repo state changed during this conversation: commit b648074 (2026-11-25 19:42, "Restore five-frame pendulum workflow and plot raw latents") made the five-frame l1_learning.py protocol active again. Notebooks 40/41 now use TrainConfig(window=5, lag=5, train_stride=2, eval_stride=4) and no longer invoke l1_climate.py. The earlier train_stride answer's "current replica stride1 / 401 anchors" rows describe only the retained l1_climate.py. The active pipeline has 196 training anchors per trajectory (t=4,6,...,394): 11,760 train / 3,920 val windows. Eval gives 75 per trajectory (t=4..300), 1,500 test.
+
+Embedding (five-frame): one sample = window [I(t-4..t)] as 5 channels -> Encoder Conv(5->16,k5,s2)+GN+SiLU (32x32) -> Conv(16->32,s2) (16x16) -> Conv(32->64,s2) (8x8) -> flatten 4096 -> Linear -> h in R^64. Temporal mixing occurs only through first-layer channels. Each method trains its own encoder instance, with the same architecture but no weight sharing. InfoNCE/BT-temporal/BT-same use head MLP 64->128 (LayerNorm, SiLU) ->2, giving z in R^2. NSV head = Decoder h -> [5,64,64] future window; after training, a SIREN refiner on train-normalized h gives z_d1..z_d8. features.npz holds h + z (+ z_unit for InfoNCE) or h + z_d{1,2,3,4,8} (NSV). Notebook 42 probes every saved key. Display picks z, else z_d2, else z_d3, plus delay-PCA baseline, as raw native coordinates.
+
+Input shapes: in original/restored five-frame runs, every encoder input is [5,64,64] (batch [128,5,64,64]). InfoNCE/BT-temporal y = [I(t+1..t+5)]. BT-same y = same window plus independent 0.01 view noise. NSV target = [I(t+1..t+5)], 5-channel decoder output. Refiner input is h (64D), not images. Delay-PCA uses 5x16x16 = 1280 block averages. Not all old runs are five-frame: the single-frame legacy family (b5f7984, analysis 45eeb9463f6b0f10) used the same l1_learning.py with window=1 -> [1,64,64], and l1_climate.py is also [1,64,64].
+
+miao
+
+
+## Explain native plots, run labels, probe R2 and validation (2026-11-25)
+
+User asks whether only PCA changed, why titles contain identifiers/patterns differ, how h64/z2 R2 is computed, whether20*196 points are plotted, and what validation selects. Verified code and returned histories. Native c45 versus original five-frame a70 reuse identical features; orientation/centering/reflection and auto-scaled axis aspect explain visual changes, plus added8-character run suffix and dimension titles. Comparison to single-frame45 is a different training/input experiment. Titles contain run-ID suffixes, not physical labels.
+
+Candidate training/validation pairs per trajectory196 (ends4..394 step2, future5); evaluation75 windows (ends4..300 step4, future reserve100);20 test trajectories yield1500 numerical samples, plot every third gives500 points. Probes train on60*75=4500 windows, select ridge alpha on20*75=1500 validation windows, report pooled20*75=1500 test-window R2 per physical variable. Standardize input and targets using training statistics; independently fit ridge maps from full h64 or full z2 to theta/v, select alpha by validation normalized MSE; encoder/refiner frozen, no display transforms. Explain supervised diagnostic distinct from self-supervised encoder training.
+
+Architecture is preset, not chosen by validation. Each method selects its minimum validation objective epoch. Histories verify BT-same epoch6, BT-temporal28, InfoNCE12, NSV prediction29; explicit NSV d2 refiner epoch30 (val normalized-h reconstruction MSE.918195). NSV dimensions1/2/3/4/8 each trained separately; displayed d2 is not validation-selected or proof ID2. MLP64 probe is fixed architecture and its validation error is diagnostic, not architecture selection. No code changes.
+
+miao
+
+
+## Plan: ground-truth phase-space reference and state-component recoverability (2026-11-25)
+
+Material Passport: academic-research-suite / experiment-agent, plan mode, phase_space_plan_v1, UNVERIFIED (proposed diagnostics not executed). User requests complete conceptual explanation and plan, not implementation. No training/code changes. Workflows read inline; no delegation. RQ: does the fixed five-frame representation retain both theta and velocity, can same-position/different-velocity states be distinguished, and are variables axis-aligned, linearly mixed or nonlinearly recoverable? Split into two is a hypothesis about distinguishable components, not two clusters, statistical independence, or mandatory z1=theta,z2=v. Illustrate invertible mixing z1=theta+v,z2=theta-v (in standardized units); joint recovery can be perfect with neither axis uniquely physical.
+
+Plan first stage uses existing Drive fixed.npz/manifest, run features.npz, and trajectory/end-frame indices; downloaded ZIP lacks these arrays. Freeze four original five-frame models; match all rows to true state at the last input frame, retain60/20/20 trajectory splits, trainstride2/evalstride4 and existing500-point scatter/1500-test-window metric distinction. Fixed g=L1 and damping.02; use simulator velocity directly, not image differencing. Plot true phase plane theta horizontal/v vertical with chronological arrows, one prespecified trajectory then several separately; damped oscillations should contract toward equilibrium rather than require a closed ring. Alongside each true trajectory show native z2 with identical row/time selection, plus raw pooled color plots. Keep h64 out of arbitrary 2D visual compression; evaluate through probes. Do not fit PCA/t-SNE or equate visual shape similarity with information recovery.
+
+Reuse/extend train-only ridge and fixed-capacity nonlinear readouts for h64,z2,NSV z_d2, PCA64 and optional NSV z_d8 diagnostic. Select ridge regularization on validation only; compare true and decoded phase-space trajectories and theta/v time series on held-out trajectories. Label decoded physical axes separately from raw latent axes. Add single-coordinate versus joint-coordinate readouts on z1,z2,(z1,z2) for theta and v to test axis specialization versus mixing; correlations alone insufficient. Primary diagnostic is recovery of both variables, with separate R2/RMSE. Do not infer total information absence from failure of a finite probe family.
+
+Use matched-angle windows from different trajectories to test velocity sign and magnitude, excluding near-zero velocity from sign diagnostic; symmetrically match velocity to test angle. Match/standardize using training-defined settings and report sparse-bin coverage. Conditional baselines theta-only -> v versus theta+representation -> v assess incremental velocity information beyond dataset correlations. Local-neighbor false matches (latent-near but physically-far in standardized theta/v) support folds/aliasing as a descriptive diagnostic, without requiring global isometry or a known latent metric. Primary h-versus-z comparisons paired by test trajectory; trajectory bootstrap, not treating overlapping windows as independent; uncertainty conditional on one trained seed. These are exploratory analyses of already examined test trajectories; subsequent architecture tuning needs untouched validation/test trajectories for confirmatory evaluation.
+
+Expected deliverables: alignment audit; true phase-space trajectories; raw latent temporal trajectories; decoded-state comparison; axis-versus-joint readout matrix; matched-position/velocity diagnostics and a compact report. Main first pass needs no representation training, GPU or checkpoint if saved features exist. Only later controlled new simulations need frozen-model inference/checkpoints. No new experimental outcome or causal diagnosis claimed. Current NSV h64 readout(theta .9996,v .9923) versus z_d2 near0 is motivation, not conclusion about the new diagnostics. Plan stage stops here; implementation not authorized by this request.
+
+miao
+
+
+## Why 64x64, and image dimension vs embedding dimension (2026-11-25)
+
+User asks whether 64x64 is because inputs are images, and whether the vector is therefore also 2D. Read-only explanation from render()/SimulationConfig.validate (l1_data.py) and Encoder (l1_learning.py). Rendered one theta=0.5 frame in memory for an ASCII illustration. No code changes.
+
+64x64 is the pixel resolution of each grayscale frame from render(). Each frame is an array with 2 axes (height, width) holding 4096 values in [0,1]. Only about 101 pixels exceed 0.1 (pivot, rod, bob); the rest are 0. validate() enforces image_size=64 because the CNN assumes 64 -> 32 -> 16 -> 8 after three stride-2 convs, then Linear(64*8*8). Clarified two meanings of "dimension": number of array axes vs number of components. The image is a 2-axis array, but as data it has 4096 components. Five frames = [5,64,64] = 20,480 numbers. h = 64-component vector; hidden_dim=64 is an independent choice, coincidentally equal to the image side. z = 2-component vector, projection_dim=2, chosen to match the 2D physical state (theta, v) and for plotting. "2D image" and "2D z" are unrelated meanings.
+
+miao
+
+
+## True phase-space scatter colored by raw latent coordinates (2026-11-25)
+
+User requests the same500 latent-plot samples on true theta/velocity axes, each coordinate taken at the final frame of its five-frame window, colored by latent coordinate. Implemented l1_state_plot.py: cached evaluation_truth.npz plus latent_coordinates.npz, exact saved test[::3] and trajectory/end-frame identity checks, four learned methods (BT-same, BT-temporal, InfoNCE, NSV),2 rows colored by raw z1/z2. Excludes PCA baseline, no new fitting/resampling/normalization. Shared true-state axes, independent raw-coordinate colorbars; no hash strings in main titles. Outputs state_space_by_latent_test.png,500-row CSV with state/color values, and provenance JSON. Added embedded helper and invocation to notebook42 Cell5, so CSV/PNG enter existing Cell6 export. Rebuilt39–42 (shared bootstrap clears helper module), README updated. Core evaluator/training/data sources unchanged; cached evaluation identity remains valid.
+
+Actual plot still pending input arrays: local Downloads/results search found no pendulum NPZ. Returned ZIPs contain only reports/images. Applied Google Drive skill, searched exact evaluation ID, latent_coordinates.npz, project folder, and raw Drive name filters for both NPZ filenames; connector returned no results. No claim of direct access to Colab data. Prepared precise Colab snippet to export the two small arrays from analysis173b0c7eaac813d1/L1a/c45df90165111f0f, to request user attachment. Do not approximate colors/positions from PNG or present a test fixture as real experimental output.
+
+Validation: targeted500-sample test passed, checking every exported true coordinate/latent color and index,20 trajectories, plus rejecting shuffled index alignment. Notebook validity/embedding test passed; build --check and git diff --check clean. No representation training, no code push, no real-result image generated yet. Existing uncommitted reports/logs preserved.
+
+miao
+
+
+## Standalone notebook42 phase-space plotting cell (2026-11-25)
+
+User asks to add the runnable cell directly to notebook42 for execution on Colab. Added Cell5a, True phase space colored by latent coordinates (standalone), with the complete plotting helper embedded inline. It mounts Drive if needed, sets the exact existing c45df90165111f0f analysis directory, and displays/saves the true-theta/velocity scatter colored by raw z1/z2 for the same500 samples. No earlier cells, helper uploads, retraining or probe evaluation are required. Existing Cell5 integration remains. Plot helper accepts a source SHA so inline execution works without __file__; the builder injects the actual helper checksum. README documents direct execution. Rebuilt notebooks and passed build --check, notebook syntax/embedding test, and targeted500-sample plot test including execution of embedded definitions in a namespace without __file__. Original arrays remain unavailable locally, so actual experimental plot will be generated by user's Colab. No push requested/performed; no training/data/evaluator changes.
+
+miao
+
+
+## Publish standalone Cell5a and Colab execution instructions (2026-11-25)
+
+User explicitly requests push and which cells to run. Prepared current plotting helper, standalone notebook42 Cell5a, regenerated notebooks, tests/README, accumulated logs and native five-frame analysis reports for origin/main. Rechecked build --check and git diff --check; earlier targeted500-point/alignment test and standalone-without-__file__/notebook validation tests passed. Remote fetch completed. Cell5a embeds its plotting code, mounts Drive as needed, and targets completed evaluation c45df90165111f0f. User needs only that code cell on Colab CPU; no prior cell variables or representation retraining are required. It displays and saves state_space_by_latent_test.png plus CSV/provenance. Cell6 is not required for this standalone route and expects RESULTS from full evaluation; an optional files.download(str(figure_path)) can download the standalone PNG. Actual pendulum image will be rendered on the user's Drive-backed Colab, not claimed generated locally. Push outcome will be verified after commit/push.
+
+miao

@@ -95,6 +95,21 @@ shows its already available PC1/PC2 without fitting another PCA.
 Notebook42 exports JSON/CSV/PNG reports in Cell6. Keep feature arrays and checkpoints
 on Drive; the report ZIP intentionally does not contain them.
 
+`state_space_by_latent_test.png` reverses the view: true final-frame theta/velocity
+are the axes, and each learned method's raw z1/z2 supplies colors in two rows.
+It uses the exact500 saved samples from `latent_test.png`, without re-fitting or
+resampling, and excludes the PCA baseline. All point/color values are exported in
+`state_space_by_latent_test.csv` (included in the report ZIP). Notebook42 Cell5
+creates this figure from `evaluation_truth.npz` and `latent_coordinates.npz`.
+**Cell5a is standalone:** run only that cell to mount Drive and draw the existing
+`c45df90165111f0f` results. It embeds all plot code and does not require Cells1–5,
+the module-upload cells, training, or readout evaluation to run first.
+For an already evaluated folder, run only the plotting helper on Colab CPU:
+
+```bash
+python l1_state_plot.py /path/to/analysis/173b0c7eaac813d1/L1a/c45df90165111f0f
+```
+
 ## Development checks
 
 ```bash

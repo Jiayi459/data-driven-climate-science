@@ -1,0 +1,9 @@
+{
+  "native": "first two untransformed feature coordinates; 1D zero-padded; higher dimensions omitted",
+  "latent_test": "original feature coordinates, no extra PCA; all displayed coordinates saved in latent_coordinates.npz",
+  "pca": "delay_pca baseline only; display its existing first two principal components without refitting",
+  "tsne": "disabled",
+  "used_by_probes": false,
+  "one_view_per": "run, preferring z",
+  "tsne_seed": 0
+}

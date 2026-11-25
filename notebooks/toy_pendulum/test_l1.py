@@ -146,6 +146,45 @@ class DataTests(unittest.TestCase):
                 self.assertIsNone(c.execution_count)
                 self.assertEqual(c.outputs, [])
 
+    def test_true_state_plot_preserves_all_500_sample_and_color_values(self):
+        from l1_state_plot import plot_state_space
+        import csv
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            index = np.column_stack((np.repeat(np.arange(100), 75), np.tile(np.arange(4, 301, 4), 100)))
+            splits = np.repeat([0, 1, 2], [4500, 1500, 1500])
+            rng = np.random.default_rng(42)
+            states = rng.normal(size=(7500, 3))
+            chosen = np.flatnonzero(splits == 2)[::3]
+            self.assertEqual(len(chosen), 500)
+            z = rng.normal(size=(500, 2))
+            label = 'bt_same_s42_fixture:z'
+            np.savez(root/'evaluation_truth.npz', states=states, index=index, splits=splits)
+            np.savez(root/'latent_coordinates.npz', sample_indices=chosen, index=index[chosen], **{label: z})
+            self.assertTrue(plot_state_space(root).is_file())
+            with (root/'state_space_by_latent_test.csv').open() as stream:
+                reader = csv.reader(stream)
+                header = next(reader)
+                values = np.array(list(reader), dtype=float)
+            self.assertEqual(header[-2:], [label+':z1', label+':z2'])
+            np.testing.assert_array_equal(values[:, :2], index[chosen])
+            np.testing.assert_array_equal(values[:, 2:4], states[chosen, :2])
+            np.testing.assert_array_equal(values[:, 4:], z)
+            meta = json.loads((root/'state_space_by_latent_protocol.json').read_text())
+            self.assertEqual((meta['samples'], meta['trajectories']), (500, 20))
+            # Embedded definitions also work in a notebook namespace without __file__.
+            from build_notebooks import state_plot_cell
+            source = ''.join(state_plot_cell()['source']).split('# Standalone:')[0]
+            namespace = {}
+            exec(compile(source, 'standalone_cell', 'exec'), namespace)
+            self.assertNotIn('__file__', namespace)
+            namespace['plot_state_space'](root, source_sha='embedded-source-test')
+            meta = json.loads((root/'state_space_by_latent_protocol.json').read_text())
+            self.assertEqual(meta['plot_source_sha256'], 'embedded-source-test')
+            np.savez(root/'latent_coordinates.npz', sample_indices=chosen, index=index[chosen][::-1], **{label: z})
+            with self.assertRaisesRegex(ValueError, 'indices do not match'):
+                plot_state_space(root)
+
 
 @unittest.skipUnless(HAS_TORCH, 'torch unavailable; run torch checks in Colab')
 class LearningTests(unittest.TestCase):
